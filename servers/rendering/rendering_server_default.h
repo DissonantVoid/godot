@@ -212,6 +212,7 @@ public:
 	FUNC1(texture_debug_usage, List<TextureInfo> *)
 
 	FUNC2(texture_set_force_redraw_if_visible, RID, bool)
+	FUNC2RC(RID, texture_get_rd_texture_rid, RID, bool)
 
 	/* SHADER API */
 
@@ -227,11 +228,11 @@ public:
 	FUNC2(shader_set_path_hint, RID, const String &)
 	FUNC1RC(String, shader_get_code, RID)
 
-	FUNC2SC(shader_get_shader_uniform_list, RID, List<PropertyInfo> *)
+	FUNC2SC(get_shader_parameter_list, RID, List<PropertyInfo> *)
 
-	FUNC4(shader_set_default_texture_param, RID, const StringName &, RID, int)
-	FUNC3RC(RID, shader_get_default_texture_param, RID, const StringName &, int)
-	FUNC2RC(Variant, shader_get_param_default, RID, const StringName &)
+	FUNC4(shader_set_default_texture_parameter, RID, const StringName &, RID, int)
+	FUNC3RC(RID, shader_get_default_texture_parameter, RID, const StringName &, int)
+	FUNC2RC(Variant, shader_get_parameter_default, RID, const StringName &)
 
 	FUNC1RC(ShaderNativeSourceCode, shader_get_native_source_code, RID)
 
@@ -410,6 +411,13 @@ public:
 	FUNC1RC(PackedInt32Array, lightmap_get_probe_capture_bsp_tree, RID)
 	FUNC1(lightmap_set_probe_capture_update_speed, float)
 
+	/* Shadow Atlas */
+	FUNC0R(RID, shadow_atlas_create)
+	FUNC3(shadow_atlas_set_size, RID, int, bool)
+	FUNC3(shadow_atlas_set_quadrant_subdivision, RID, int, int)
+
+	FUNC2(directional_shadow_atlas_set_size, int, bool)
+
 	/* DECAL API */
 
 #undef ServerName
@@ -550,7 +558,7 @@ public:
 #undef server_name
 #undef ServerName
 //from now on, calls forwarded to this singleton
-#define ServerName RendererScene
+#define ServerName RenderingMethod
 #define server_name RSG::scene
 
 	/* CAMERA API */
@@ -603,6 +611,8 @@ public:
 	FUNC2(viewport_set_disable_environment, RID, bool)
 	FUNC2(viewport_set_disable_3d, RID, bool)
 
+	FUNC2(viewport_set_canvas_cull_mask, RID, uint32_t)
+
 	FUNC2(viewport_attach_camera, RID, RID)
 	FUNC2(viewport_set_scenario, RID, RID)
 	FUNC2(viewport_attach_canvas, RID, RID)
@@ -649,10 +659,9 @@ public:
 #undef server_name
 #undef ServerName
 //from now on, calls forwarded to this singleton
-#define ServerName RendererScene
+#define ServerName RenderingMethod
 #define server_name RSG::scene
 
-	FUNC2(directional_shadow_atlas_set_size, int, bool)
 	FUNC1(voxel_gi_set_quality, VoxelGIQuality)
 
 	/* SKY API */
@@ -739,7 +748,7 @@ public:
 #undef server_name
 #undef ServerName
 
-#define ServerName RendererScene
+#define ServerName RenderingMethod
 #define server_name RSG::scene
 
 	FUNCRIDSPLIT(scenario)
@@ -783,12 +792,12 @@ public:
 	FUNC4(instance_geometry_set_lightmap, RID, RID, const Rect2 &, int)
 	FUNC2(instance_geometry_set_lod_bias, RID, float)
 	FUNC2(instance_geometry_set_transparency, RID, float)
-	FUNC3(instance_geometry_set_shader_uniform, RID, const StringName &, const Variant &)
-	FUNC2RC(Variant, instance_geometry_get_shader_uniform, RID, const StringName &)
-	FUNC2RC(Variant, instance_geometry_get_shader_uniform_default_value, RID, const StringName &)
-	FUNC2C(instance_geometry_get_shader_uniform_list, RID, List<PropertyInfo> *)
+	FUNC3(instance_geometry_set_shader_parameter, RID, const StringName &, const Variant &)
+	FUNC2RC(Variant, instance_geometry_get_shader_parameter, RID, const StringName &)
+	FUNC2RC(Variant, instance_geometry_get_shader_parameter_default_value, RID, const StringName &)
+	FUNC2C(instance_geometry_get_shader_parameter_list, RID, List<PropertyInfo> *)
 
-	FUNC3R(TypedArray<Image>, bake_render_uv2, RID, const Vector<RID> &, const Size2i &)
+	FUNC3R(TypedArray<Image>, bake_render_uv2, RID, const TypedArray<RID> &, const Size2i &)
 
 	FUNC1(gi_set_use_half_resolution, bool)
 
@@ -821,6 +830,8 @@ public:
 
 	FUNC2(canvas_item_set_visible, RID, bool)
 	FUNC2(canvas_item_set_light_mask, RID, int)
+
+	FUNC2(canvas_item_set_visibility_layer, RID, uint32_t)
 
 	FUNC2(canvas_item_set_update_when_visible, RID, bool)
 
@@ -919,16 +930,16 @@ public:
 #define ServerName RendererMaterialStorage
 #define server_name RSG::material_storage
 
-	FUNC3(global_shader_uniform_add, const StringName &, GlobalShaderUniformType, const Variant &)
-	FUNC1(global_shader_uniform_remove, const StringName &)
-	FUNC0RC(Vector<StringName>, global_shader_uniform_get_list)
-	FUNC2(global_shader_uniform_set, const StringName &, const Variant &)
-	FUNC2(global_shader_uniform_set_override, const StringName &, const Variant &)
-	FUNC1RC(GlobalShaderUniformType, global_shader_uniform_get_type, const StringName &)
-	FUNC1RC(Variant, global_shader_uniform_get, const StringName &)
+	FUNC3(global_shader_parameter_add, const StringName &, GlobalShaderParameterType, const Variant &)
+	FUNC1(global_shader_parameter_remove, const StringName &)
+	FUNC0RC(Vector<StringName>, global_shader_parameter_get_list)
+	FUNC2(global_shader_parameter_set, const StringName &, const Variant &)
+	FUNC2(global_shader_parameter_set_override, const StringName &, const Variant &)
+	FUNC1RC(GlobalShaderParameterType, global_shader_parameter_get_type, const StringName &)
+	FUNC1RC(Variant, global_shader_parameter_get, const StringName &)
 
-	FUNC1(global_shader_uniforms_load_settings, bool)
-	FUNC0(global_shader_uniforms_clear)
+	FUNC1(global_shader_parameters_load_settings, bool)
+	FUNC0(global_shader_parameters_clear)
 
 #undef server_name
 #undef ServerName
@@ -987,6 +998,8 @@ public:
 	virtual void sdfgi_set_debug_probe_select(const Vector3 &p_position, const Vector3 &p_dir) override;
 
 	virtual void set_print_gpu_profile(bool p_enable) override;
+
+	virtual Size2i get_maximum_viewport_size() const override;
 
 	RenderingServerDefault(bool p_create_thread = false);
 	~RenderingServerDefault();

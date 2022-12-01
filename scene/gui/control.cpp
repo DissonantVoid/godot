@@ -44,6 +44,7 @@
 #include "scene/main/window.h"
 #include "scene/scene_string_names.h"
 #include "scene/theme/theme_db.h"
+#include "scene/theme/theme_owner.h"
 #include "servers/rendering_server.h"
 #include "servers/text_server.h"
 
@@ -212,11 +213,15 @@ void Control::get_argument_options(const StringName &p_function, int p_idx, List
 	}
 }
 
-TypedArray<String> Control::get_configuration_warnings() const {
-	TypedArray<String> warnings = Node::get_configuration_warnings();
+PackedStringArray Control::get_configuration_warnings() const {
+	PackedStringArray warnings = Node::get_configuration_warnings();
 
 	if (data.mouse_filter == MOUSE_FILTER_IGNORE && !data.tooltip.is_empty()) {
 		warnings.push_back(RTR("The Hint Tooltip won't be displayed as the control's Mouse Filter is set to \"Ignore\". To solve this, set the Mouse Filter to \"Stop\" or \"Pass\"."));
+	}
+
+	if (get_z_index() != 0) {
+		warnings.push_back(RTR("Changing the Z index of a control only affects the drawing order, not the input event handling order."));
 	}
 
 	return warnings;
@@ -480,10 +485,10 @@ void Control::_validate_property(PropertyInfo &p_property) const {
 		}
 	} else if (Object::cast_to<Container>(parent_node)) {
 		// If the parent is a container, display only container-related properties.
-		if (p_property.name.begins_with("anchor_") || p_property.name.begins_with("offset_") || p_property.name.begins_with("grow_") || p_property.name == "anchors_preset" ||
-				p_property.name == "position" || p_property.name == "rotation" || p_property.name == "scale" || p_property.name == "size" || p_property.name == "pivot_offset") {
-			p_property.usage ^= PROPERTY_USAGE_EDITOR;
-
+		if (p_property.name.begins_with("anchor_") || p_property.name.begins_with("offset_") || p_property.name.begins_with("grow_") || p_property.name == "anchors_preset") {
+			p_property.usage ^= PROPERTY_USAGE_DEFAULT;
+		} else if (p_property.name == "position" || p_property.name == "rotation" || p_property.name == "scale" || p_property.name == "size" || p_property.name == "pivot_offset") {
+			p_property.usage = PROPERTY_USAGE_EDITOR | PROPERTY_USAGE_READ_ONLY;
 		} else if (p_property.name == "layout_mode") {
 			// Set the layout mode to be disabled with the proper value.
 			p_property.hint_string = "Position,Anchors,Container,Uncontrolled";
@@ -632,7 +637,7 @@ Rect2 Control::get_parent_anchorable_rect() const {
 #ifdef TOOLS_ENABLED
 		Node *edited_root = get_tree()->get_edited_scene_root();
 		if (edited_root && (this == edited_root || edited_root->is_ancestor_of(this))) {
-			parent_rect.size = Size2(ProjectSettings::get_singleton()->get("display/window/size/viewport_width"), ProjectSettings::get_singleton()->get("display/window/size/viewport_height"));
+			parent_rect.size = Size2(GLOBAL_GET("display/window/size/viewport_width"), GLOBAL_GET("display/window/size/viewport_height"));
 		} else {
 			parent_rect = get_viewport()->get_visible_rect();
 		}
@@ -1435,13 +1440,6 @@ Rect2 Control::get_screen_rect() const {
 	return r;
 }
 
-Rect2 Control::get_window_rect() const {
-	ERR_FAIL_COND_V(!is_inside_tree(), Rect2());
-	Rect2 gr = get_global_rect();
-	gr.position += get_viewport()->get_visible_rect().position;
-	return gr;
-}
-
 Rect2 Control::get_anchorable_rect() const {
 	return Rect2(Point2(), get_size());
 }
@@ -1557,10 +1555,8 @@ bool Control::is_minimum_size_adjust_blocked() const {
 
 Size2 Control::get_minimum_size() const {
 	Vector2 ms;
-	if (GDVIRTUAL_CALL(_get_minimum_size, ms)) {
-		return ms;
-	}
-	return Vector2();
+	GDVIRTUAL_CALL(_get_minimum_size, ms);
+	return ms;
 }
 
 void Control::set_custom_minimum_size(const Size2 &p_custom) {
@@ -1758,6 +1754,34 @@ void Control::warp_mouse(const Point2 &p_position) {
 	get_viewport()->warp_mouse(get_global_transform_with_canvas().xform(p_position));
 }
 
+void Control::set_shortcut_context(const Node *p_node) {
+	if (p_node != nullptr) {
+		data.shortcut_context = p_node->get_instance_id();
+	} else {
+		data.shortcut_context = ObjectID();
+	}
+}
+
+Node *Control::get_shortcut_context() const {
+	Object *ctx_obj = ObjectDB::get_instance(data.shortcut_context);
+	Node *ctx_node = Object::cast_to<Node>(ctx_obj);
+
+	return ctx_node;
+}
+
+bool Control::is_focus_owner_in_shortcut_context() const {
+	if (data.shortcut_context == ObjectID()) {
+		// No context, therefore global - always "in" context.
+		return true;
+	}
+
+	const Node *ctx_node = get_shortcut_context();
+	const Control *vp_focus = get_viewport() ? get_viewport()->gui_get_focus_owner() : nullptr;
+
+	// If the context is valid and the viewport focus is valid, check if the context is the focus or is a parent of it.
+	return ctx_node && vp_focus && (ctx_node == vp_focus || ctx_node->is_ancestor_of(vp_focus));
+}
+
 // Drag and drop handling.
 
 void Control::set_drag_forwarding(Object *p_target) {
@@ -1777,11 +1801,8 @@ Variant Control::get_drag_data(const Point2 &p_point) {
 	}
 
 	Variant dd;
-	if (GDVIRTUAL_CALL(_get_drag_data, p_point, dd)) {
-		return dd;
-	}
-
-	return Variant();
+	GDVIRTUAL_CALL(_get_drag_data, p_point, dd);
+	return dd;
 }
 
 bool Control::can_drop_data(const Point2 &p_point, const Variant &p_data) const {
@@ -1792,11 +1813,9 @@ bool Control::can_drop_data(const Point2 &p_point, const Variant &p_data) const 
 		}
 	}
 
-	bool ret;
-	if (GDVIRTUAL_CALL(_can_drop_data, p_point, p_data, ret)) {
-		return ret;
-	}
-	return false;
+	bool ret = false;
+	GDVIRTUAL_CALL(_can_drop_data, p_point, p_data, ret);
+	return ret;
 }
 
 void Control::drop_data(const Point2 &p_point, const Variant &p_data) {
@@ -2224,7 +2243,19 @@ void Control::_window_find_focus_neighbor(const Vector2 &p_dir, Node *p_at, cons
 void Control::set_default_cursor_shape(CursorShape p_shape) {
 	ERR_FAIL_INDEX(int(p_shape), CURSOR_MAX);
 
+	if (data.default_cursor == p_shape) {
+		return;
+	}
 	data.default_cursor = p_shape;
+
+	if (!is_inside_tree()) {
+		return;
+	}
+	if (!get_global_rect().has_point(get_global_mouse_position())) {
+		return;
+	}
+
+	get_viewport()->get_base_window()->update_mouse_cursor_shape();
 }
 
 Control::CursorShape Control::get_default_cursor_shape() const {
@@ -2261,57 +2292,9 @@ bool Control::is_clipping_contents() {
 
 // Theming.
 
-void Control::_propagate_theme_changed(Node *p_at, Control *p_owner, Window *p_owner_window, bool p_notify, bool p_assign) {
-	Control *c = Object::cast_to<Control>(p_at);
-	Window *w = c == nullptr ? Object::cast_to<Window>(p_at) : nullptr;
-
-	if (!c && !w) {
-		// Theme inheritance chains are broken by nodes that aren't Control or Window.
-		return;
-	}
-
-	bool assign = p_assign;
-	if (c) {
-		if (c != p_owner && c->data.theme.is_valid()) {
-			// Has a theme, so we don't want to change the theme owner,
-			// but we still want to propagate in case this child has theme items
-			// it inherits from the theme this node uses.
-			// See https://github.com/godotengine/godot/issues/62844.
-			assign = false;
-		}
-
-		if (assign) {
-			c->data.theme_owner = p_owner;
-			c->data.theme_owner_window = p_owner_window;
-		}
-
-		if (p_notify) {
-			c->notification(Control::NOTIFICATION_THEME_CHANGED);
-		}
-	} else if (w) {
-		if (w != p_owner_window && w->theme.is_valid()) {
-			// Same as above.
-			assign = false;
-		}
-
-		if (assign) {
-			w->theme_owner = p_owner;
-			w->theme_owner_window = p_owner_window;
-		}
-
-		if (p_notify) {
-			w->notification(Window::NOTIFICATION_THEME_CHANGED);
-		}
-	}
-
-	for (int i = 0; i < p_at->get_child_count(); i++) {
-		_propagate_theme_changed(p_at->get_child(i), p_owner, p_owner_window, p_notify, assign);
-	}
-}
-
 void Control::_theme_changed() {
 	if (is_inside_tree()) {
-		_propagate_theme_changed(this, this, nullptr, true, false);
+		data.theme_owner->propagate_theme_changed(this, this, true, false);
 	}
 }
 
@@ -2333,6 +2316,18 @@ void Control::_invalidate_theme_cache() {
 void Control::_update_theme_item_cache() {
 }
 
+void Control::set_theme_owner_node(Node *p_node) {
+	data.theme_owner->set_owner_node(p_node);
+}
+
+Node *Control::get_theme_owner_node() const {
+	return data.theme_owner->get_owner_node();
+}
+
+bool Control::has_theme_owner_node() const {
+	return data.theme_owner->has_owner_node();
+}
+
 void Control::set_theme(const Ref<Theme> &p_theme) {
 	if (data.theme == p_theme) {
 		return;
@@ -2344,24 +2339,24 @@ void Control::set_theme(const Ref<Theme> &p_theme) {
 
 	data.theme = p_theme;
 	if (data.theme.is_valid()) {
-		_propagate_theme_changed(this, this, nullptr, is_inside_tree(), true);
+		data.theme_owner->propagate_theme_changed(this, this, is_inside_tree(), true);
 		data.theme->connect("changed", callable_mp(this, &Control::_theme_changed), CONNECT_DEFERRED);
 		return;
 	}
 
 	Control *parent_c = Object::cast_to<Control>(get_parent());
-	if (parent_c && (parent_c->data.theme_owner || parent_c->data.theme_owner_window)) {
-		_propagate_theme_changed(this, parent_c->data.theme_owner, parent_c->data.theme_owner_window, is_inside_tree(), true);
+	if (parent_c && parent_c->has_theme_owner_node()) {
+		data.theme_owner->propagate_theme_changed(this, parent_c->get_theme_owner_node(), is_inside_tree(), true);
 		return;
 	}
 
 	Window *parent_w = cast_to<Window>(get_parent());
-	if (parent_w && (parent_w->theme_owner || parent_w->theme_owner_window)) {
-		_propagate_theme_changed(this, parent_w->theme_owner, parent_w->theme_owner_window, is_inside_tree(), true);
+	if (parent_w && parent_w->has_theme_owner_node()) {
+		data.theme_owner->propagate_theme_changed(this, parent_w->get_theme_owner_node(), is_inside_tree(), true);
 		return;
 	}
 
-	_propagate_theme_changed(this, nullptr, nullptr, is_inside_tree(), true);
+	data.theme_owner->propagate_theme_changed(this, nullptr, is_inside_tree(), true);
 }
 
 Ref<Theme> Control::get_theme() const {
@@ -2384,130 +2379,6 @@ StringName Control::get_theme_type_variation() const {
 
 /// Theme property lookup.
 
-template <class T>
-T Control::get_theme_item_in_types(Control *p_theme_owner, Window *p_theme_owner_window, Theme::DataType p_data_type, const StringName &p_name, List<StringName> p_theme_types) {
-	ERR_FAIL_COND_V_MSG(p_theme_types.size() == 0, T(), "At least one theme type must be specified.");
-
-	// First, look through each control or window node in the branch, until no valid parent can be found.
-	// Only nodes with a theme resource attached are considered.
-	Control *theme_owner = p_theme_owner;
-	Window *theme_owner_window = p_theme_owner_window;
-
-	while (theme_owner || theme_owner_window) {
-		// For each theme resource check the theme types provided and see if p_name exists with any of them.
-		for (const StringName &E : p_theme_types) {
-			if (theme_owner && theme_owner->data.theme->has_theme_item(p_data_type, p_name, E)) {
-				return theme_owner->data.theme->get_theme_item(p_data_type, p_name, E);
-			}
-
-			if (theme_owner_window && theme_owner_window->theme->has_theme_item(p_data_type, p_name, E)) {
-				return theme_owner_window->theme->get_theme_item(p_data_type, p_name, E);
-			}
-		}
-
-		Node *parent = theme_owner ? theme_owner->get_parent() : theme_owner_window->get_parent();
-		Control *parent_c = Object::cast_to<Control>(parent);
-		if (parent_c) {
-			theme_owner = parent_c->data.theme_owner;
-			theme_owner_window = parent_c->data.theme_owner_window;
-		} else {
-			Window *parent_w = Object::cast_to<Window>(parent);
-			if (parent_w) {
-				theme_owner = parent_w->theme_owner;
-				theme_owner_window = parent_w->theme_owner_window;
-			} else {
-				theme_owner = nullptr;
-				theme_owner_window = nullptr;
-			}
-		}
-	}
-
-	// Secondly, check the project-defined Theme resource.
-	if (ThemeDB::get_singleton()->get_project_theme().is_valid()) {
-		for (const StringName &E : p_theme_types) {
-			if (ThemeDB::get_singleton()->get_project_theme()->has_theme_item(p_data_type, p_name, E)) {
-				return ThemeDB::get_singleton()->get_project_theme()->get_theme_item(p_data_type, p_name, E);
-			}
-		}
-	}
-
-	// Lastly, fall back on the items defined in the default Theme, if they exist.
-	for (const StringName &E : p_theme_types) {
-		if (ThemeDB::get_singleton()->get_default_theme()->has_theme_item(p_data_type, p_name, E)) {
-			return ThemeDB::get_singleton()->get_default_theme()->get_theme_item(p_data_type, p_name, E);
-		}
-	}
-	// If they don't exist, use any type to return the default/empty value.
-	return ThemeDB::get_singleton()->get_default_theme()->get_theme_item(p_data_type, p_name, p_theme_types[0]);
-}
-
-bool Control::has_theme_item_in_types(Control *p_theme_owner, Window *p_theme_owner_window, Theme::DataType p_data_type, const StringName &p_name, List<StringName> p_theme_types) {
-	ERR_FAIL_COND_V_MSG(p_theme_types.size() == 0, false, "At least one theme type must be specified.");
-
-	// First, look through each control or window node in the branch, until no valid parent can be found.
-	// Only nodes with a theme resource attached are considered.
-	Control *theme_owner = p_theme_owner;
-	Window *theme_owner_window = p_theme_owner_window;
-
-	while (theme_owner || theme_owner_window) {
-		// For each theme resource check the theme types provided and see if p_name exists with any of them.
-		for (const StringName &E : p_theme_types) {
-			if (theme_owner && theme_owner->data.theme->has_theme_item(p_data_type, p_name, E)) {
-				return true;
-			}
-
-			if (theme_owner_window && theme_owner_window->theme->has_theme_item(p_data_type, p_name, E)) {
-				return true;
-			}
-		}
-
-		Node *parent = theme_owner ? theme_owner->get_parent() : theme_owner_window->get_parent();
-		Control *parent_c = Object::cast_to<Control>(parent);
-		if (parent_c) {
-			theme_owner = parent_c->data.theme_owner;
-			theme_owner_window = parent_c->data.theme_owner_window;
-		} else {
-			Window *parent_w = Object::cast_to<Window>(parent);
-			if (parent_w) {
-				theme_owner = parent_w->theme_owner;
-				theme_owner_window = parent_w->theme_owner_window;
-			} else {
-				theme_owner = nullptr;
-				theme_owner_window = nullptr;
-			}
-		}
-	}
-
-	// Secondly, check the project-defined Theme resource.
-	if (ThemeDB::get_singleton()->get_project_theme().is_valid()) {
-		for (const StringName &E : p_theme_types) {
-			if (ThemeDB::get_singleton()->get_project_theme()->has_theme_item(p_data_type, p_name, E)) {
-				return true;
-			}
-		}
-	}
-
-	// Lastly, fall back on the items defined in the default Theme, if they exist.
-	for (const StringName &E : p_theme_types) {
-		if (ThemeDB::get_singleton()->get_default_theme()->has_theme_item(p_data_type, p_name, E)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-void Control::_get_theme_type_dependencies(const StringName &p_theme_type, List<StringName> *p_list) const {
-	if (p_theme_type == StringName() || p_theme_type == get_class_name() || p_theme_type == data.theme_type_variation) {
-		if (ThemeDB::get_singleton()->get_project_theme().is_valid() && ThemeDB::get_singleton()->get_project_theme()->get_type_variation_base(data.theme_type_variation) != StringName()) {
-			ThemeDB::get_singleton()->get_project_theme()->get_type_dependencies(get_class_name(), data.theme_type_variation, p_list);
-		} else {
-			ThemeDB::get_singleton()->get_default_theme()->get_type_dependencies(get_class_name(), data.theme_type_variation, p_list);
-		}
-	} else {
-		ThemeDB::get_singleton()->get_default_theme()->get_type_dependencies(p_theme_type, StringName(), p_list);
-	}
-}
-
 Ref<Texture2D> Control::get_theme_icon(const StringName &p_name, const StringName &p_theme_type) const {
 	if (p_theme_type == StringName() || p_theme_type == get_class_name() || p_theme_type == data.theme_type_variation) {
 		const Ref<Texture2D> *tex = data.icon_override.getptr(p_name);
@@ -2521,8 +2392,8 @@ Ref<Texture2D> Control::get_theme_icon(const StringName &p_name, const StringNam
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Ref<Texture2D> icon = get_theme_item_in_types<Ref<Texture2D>>(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_ICON, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Ref<Texture2D> icon = data.theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_ICON, p_name, theme_types);
 	data.theme_icon_cache[p_theme_type][p_name] = icon;
 	return icon;
 }
@@ -2540,8 +2411,8 @@ Ref<StyleBox> Control::get_theme_stylebox(const StringName &p_name, const String
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Ref<StyleBox> style = get_theme_item_in_types<Ref<StyleBox>>(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Ref<StyleBox> style = data.theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
 	data.theme_style_cache[p_theme_type][p_name] = style;
 	return style;
 }
@@ -2559,8 +2430,8 @@ Ref<Font> Control::get_theme_font(const StringName &p_name, const StringName &p_
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Ref<Font> font = get_theme_item_in_types<Ref<Font>>(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_FONT, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Ref<Font> font = data.theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_FONT, p_name, theme_types);
 	data.theme_font_cache[p_theme_type][p_name] = font;
 	return font;
 }
@@ -2578,8 +2449,8 @@ int Control::get_theme_font_size(const StringName &p_name, const StringName &p_t
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	int font_size = get_theme_item_in_types<int>(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	int font_size = data.theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
 	data.theme_font_size_cache[p_theme_type][p_name] = font_size;
 	return font_size;
 }
@@ -2597,8 +2468,8 @@ Color Control::get_theme_color(const StringName &p_name, const StringName &p_the
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Color color = get_theme_item_in_types<Color>(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_COLOR, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Color color = data.theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_COLOR, p_name, theme_types);
 	data.theme_color_cache[p_theme_type][p_name] = color;
 	return color;
 }
@@ -2616,8 +2487,8 @@ int Control::get_theme_constant(const StringName &p_name, const StringName &p_th
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	int constant = get_theme_item_in_types<int>(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	int constant = data.theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
 	data.theme_constant_cache[p_theme_type][p_name] = constant;
 	return constant;
 }
@@ -2630,8 +2501,8 @@ bool Control::has_theme_icon(const StringName &p_name, const StringName &p_theme
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return has_theme_item_in_types(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_ICON, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return data.theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_ICON, p_name, theme_types);
 }
 
 bool Control::has_theme_stylebox(const StringName &p_name, const StringName &p_theme_type) const {
@@ -2642,8 +2513,8 @@ bool Control::has_theme_stylebox(const StringName &p_name, const StringName &p_t
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return has_theme_item_in_types(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return data.theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
 }
 
 bool Control::has_theme_font(const StringName &p_name, const StringName &p_theme_type) const {
@@ -2654,8 +2525,8 @@ bool Control::has_theme_font(const StringName &p_name, const StringName &p_theme
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return has_theme_item_in_types(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_FONT, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return data.theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_FONT, p_name, theme_types);
 }
 
 bool Control::has_theme_font_size(const StringName &p_name, const StringName &p_theme_type) const {
@@ -2666,8 +2537,8 @@ bool Control::has_theme_font_size(const StringName &p_name, const StringName &p_
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return has_theme_item_in_types(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return data.theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
 }
 
 bool Control::has_theme_color(const StringName &p_name, const StringName &p_theme_type) const {
@@ -2678,8 +2549,8 @@ bool Control::has_theme_color(const StringName &p_name, const StringName &p_them
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return has_theme_item_in_types(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_COLOR, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return data.theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_COLOR, p_name, theme_types);
 }
 
 bool Control::has_theme_constant(const StringName &p_name, const StringName &p_theme_type) const {
@@ -2690,8 +2561,8 @@ bool Control::has_theme_constant(const StringName &p_name, const StringName &p_t
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return has_theme_item_in_types(data.theme_owner, data.theme_owner_window, Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
+	data.theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return data.theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
 }
 
 /// Local property overrides.
@@ -2821,157 +2692,16 @@ bool Control::has_theme_constant_override(const StringName &p_name) const {
 
 /// Default theme properties.
 
-float Control::fetch_theme_default_base_scale(Control *p_theme_owner, Window *p_theme_owner_window) {
-	// First, look through each control or window node in the branch, until no valid parent can be found.
-	// Only nodes with a theme resource attached are considered.
-	// For each theme resource see if their assigned theme has the default value defined and valid.
-	Control *theme_owner = p_theme_owner;
-	Window *theme_owner_window = p_theme_owner_window;
-
-	while (theme_owner || theme_owner_window) {
-		if (theme_owner && theme_owner->data.theme->has_default_base_scale()) {
-			return theme_owner->data.theme->get_default_base_scale();
-		}
-
-		if (theme_owner_window && theme_owner_window->theme->has_default_base_scale()) {
-			return theme_owner_window->theme->get_default_base_scale();
-		}
-
-		Node *parent = theme_owner ? theme_owner->get_parent() : theme_owner_window->get_parent();
-		Control *parent_c = Object::cast_to<Control>(parent);
-		if (parent_c) {
-			theme_owner = parent_c->data.theme_owner;
-			theme_owner_window = parent_c->data.theme_owner_window;
-		} else {
-			Window *parent_w = Object::cast_to<Window>(parent);
-			if (parent_w) {
-				theme_owner = parent_w->theme_owner;
-				theme_owner_window = parent_w->theme_owner_window;
-			} else {
-				theme_owner = nullptr;
-				theme_owner_window = nullptr;
-			}
-		}
-	}
-
-	// Secondly, check the project-defined Theme resource.
-	if (ThemeDB::get_singleton()->get_project_theme().is_valid()) {
-		if (ThemeDB::get_singleton()->get_project_theme()->has_default_base_scale()) {
-			return ThemeDB::get_singleton()->get_project_theme()->get_default_base_scale();
-		}
-	}
-
-	// Lastly, fall back on the default Theme.
-	if (ThemeDB::get_singleton()->get_default_theme()->has_default_base_scale()) {
-		return ThemeDB::get_singleton()->get_default_theme()->get_default_base_scale();
-	}
-	return ThemeDB::get_singleton()->get_fallback_base_scale();
-}
-
 float Control::get_theme_default_base_scale() const {
-	return fetch_theme_default_base_scale(data.theme_owner, data.theme_owner_window);
-}
-
-Ref<Font> Control::fetch_theme_default_font(Control *p_theme_owner, Window *p_theme_owner_window) {
-	// First, look through each control or window node in the branch, until no valid parent can be found.
-	// Only nodes with a theme resource attached are considered.
-	// For each theme resource see if their assigned theme has the default value defined and valid.
-	Control *theme_owner = p_theme_owner;
-	Window *theme_owner_window = p_theme_owner_window;
-
-	while (theme_owner || theme_owner_window) {
-		if (theme_owner && theme_owner->data.theme->has_default_font()) {
-			return theme_owner->data.theme->get_default_font();
-		}
-
-		if (theme_owner_window && theme_owner_window->theme->has_default_font()) {
-			return theme_owner_window->theme->get_default_font();
-		}
-
-		Node *parent = theme_owner ? theme_owner->get_parent() : theme_owner_window->get_parent();
-		Control *parent_c = Object::cast_to<Control>(parent);
-		if (parent_c) {
-			theme_owner = parent_c->data.theme_owner;
-			theme_owner_window = parent_c->data.theme_owner_window;
-		} else {
-			Window *parent_w = Object::cast_to<Window>(parent);
-			if (parent_w) {
-				theme_owner = parent_w->theme_owner;
-				theme_owner_window = parent_w->theme_owner_window;
-			} else {
-				theme_owner = nullptr;
-				theme_owner_window = nullptr;
-			}
-		}
-	}
-
-	// Secondly, check the project-defined Theme resource.
-	if (ThemeDB::get_singleton()->get_project_theme().is_valid()) {
-		if (ThemeDB::get_singleton()->get_project_theme()->has_default_font()) {
-			return ThemeDB::get_singleton()->get_project_theme()->get_default_font();
-		}
-	}
-
-	// Lastly, fall back on the default Theme.
-	if (ThemeDB::get_singleton()->get_default_theme()->has_default_font()) {
-		return ThemeDB::get_singleton()->get_default_theme()->get_default_font();
-	}
-	return ThemeDB::get_singleton()->get_fallback_font();
+	return data.theme_owner->get_theme_default_base_scale();
 }
 
 Ref<Font> Control::get_theme_default_font() const {
-	return fetch_theme_default_font(data.theme_owner, data.theme_owner_window);
-}
-
-int Control::fetch_theme_default_font_size(Control *p_theme_owner, Window *p_theme_owner_window) {
-	// First, look through each control or window node in the branch, until no valid parent can be found.
-	// Only nodes with a theme resource attached are considered.
-	// For each theme resource see if their assigned theme has the default value defined and valid.
-	Control *theme_owner = p_theme_owner;
-	Window *theme_owner_window = p_theme_owner_window;
-
-	while (theme_owner || theme_owner_window) {
-		if (theme_owner && theme_owner->data.theme->has_default_font_size()) {
-			return theme_owner->data.theme->get_default_font_size();
-		}
-
-		if (theme_owner_window && theme_owner_window->theme->has_default_font_size()) {
-			return theme_owner_window->theme->get_default_font_size();
-		}
-
-		Node *parent = theme_owner ? theme_owner->get_parent() : theme_owner_window->get_parent();
-		Control *parent_c = Object::cast_to<Control>(parent);
-		if (parent_c) {
-			theme_owner = parent_c->data.theme_owner;
-			theme_owner_window = parent_c->data.theme_owner_window;
-		} else {
-			Window *parent_w = Object::cast_to<Window>(parent);
-			if (parent_w) {
-				theme_owner = parent_w->theme_owner;
-				theme_owner_window = parent_w->theme_owner_window;
-			} else {
-				theme_owner = nullptr;
-				theme_owner_window = nullptr;
-			}
-		}
-	}
-
-	// Secondly, check the project-defined Theme resource.
-	if (ThemeDB::get_singleton()->get_project_theme().is_valid()) {
-		if (ThemeDB::get_singleton()->get_project_theme()->has_default_font_size()) {
-			return ThemeDB::get_singleton()->get_project_theme()->get_default_font_size();
-		}
-	}
-
-	// Lastly, fall back on the default Theme.
-	if (ThemeDB::get_singleton()->get_default_theme()->has_default_font_size()) {
-		return ThemeDB::get_singleton()->get_default_theme()->get_default_font_size();
-	}
-	return ThemeDB::get_singleton()->get_fallback_font_size();
+	return data.theme_owner->get_theme_default_font();
 }
 
 int Control::get_theme_default_font_size() const {
-	return fetch_theme_default_font_size(data.theme_owner, data.theme_owner_window);
+	return data.theme_owner->get_theme_default_font_size();
 }
 
 /// Bulk actions.
@@ -2992,11 +2722,8 @@ void Control::end_bulk_theme_override() {
 TypedArray<Vector2i> Control::structured_text_parser(TextServer::StructuredTextParser p_parser_type, const Array &p_args, const String &p_text) const {
 	if (p_parser_type == TextServer::STRUCTURED_TEXT_CUSTOM) {
 		TypedArray<Vector2i> ret;
-		if (GDVIRTUAL_CALL(_structured_text_parser, p_args, p_text, ret)) {
-			return ret;
-		} else {
-			return TypedArray<Vector2i>();
-		}
+		GDVIRTUAL_CALL(_structured_text_parser, p_args, p_text, ret);
+		return ret;
 	} else {
 		return TS->parse_structured_text(p_parser_type, p_args, p_text);
 	}
@@ -3050,6 +2777,20 @@ bool Control::is_layout_rtl() const {
 	return data.is_rtl;
 }
 
+void Control::set_localize_numeral_system(bool p_enable) {
+	if (p_enable == data.localize_numeral_system) {
+		return;
+	}
+
+	data.localize_numeral_system = p_enable;
+
+	notification(MainLoop::NOTIFICATION_TRANSLATION_CHANGED);
+}
+
+bool Control::is_localizing_numeral_system() const {
+	return data.localize_numeral_system;
+}
+
 void Control::set_auto_translate(bool p_enable) {
 	if (p_enable == data.auto_translate) {
 		return;
@@ -3081,28 +2822,11 @@ String Control::get_tooltip(const Point2 &p_pos) const {
 
 Control *Control::make_custom_tooltip(const String &p_text) const {
 	Object *ret = nullptr;
-	if (GDVIRTUAL_CALL(_make_custom_tooltip, p_text, ret)) {
-		return Object::cast_to<Control>(ret);
-	}
-	return nullptr;
+	GDVIRTUAL_CALL(_make_custom_tooltip, p_text, ret);
+	return Object::cast_to<Control>(ret);
 }
 
 // Base object overrides.
-
-void Control::add_child_notify(Node *p_child) {
-	// We propagate when this node uses a custom theme, so it can pass it on to its children.
-	if (data.theme_owner || data.theme_owner_window) {
-		// `p_notify` is false here as `NOTIFICATION_THEME_CHANGED` will be handled by `NOTIFICATION_ENTER_TREE`.
-		_propagate_theme_changed(p_child, data.theme_owner, data.theme_owner_window, false, true);
-	}
-}
-
-void Control::remove_child_notify(Node *p_child) {
-	// If the removed child isn't inheriting any theme items through this node, then there's no need to propagate.
-	if (data.theme_owner || data.theme_owner_window) {
-		_propagate_theme_changed(p_child, nullptr, nullptr, false, true);
-	}
-}
 
 void Control::_notification(int p_notification) {
 	switch (p_notification) {
@@ -3111,10 +2835,16 @@ void Control::_notification(int p_notification) {
 			_update_theme_item_cache();
 		} break;
 
+		case NOTIFICATION_PARENTED: {
+			data.theme_owner->assign_theme_on_parented(this);
+		} break;
+
+		case NOTIFICATION_UNPARENTED: {
+			data.theme_owner->clear_theme_on_unparented(this);
+		} break;
+
 		case NOTIFICATION_ENTER_TREE: {
-			// Need to defer here, because theme owner information might be set in
-			// add_child_notify, which doesn't get called until right after this.
-			call_deferred(SNAME("notification"), NOTIFICATION_THEME_CHANGED);
+			notification(NOTIFICATION_THEME_CHANGED);
 		} break;
 
 		case NOTIFICATION_POST_ENTER_TREE: {
@@ -3130,7 +2860,7 @@ void Control::_notification(int p_notification) {
 
 		case NOTIFICATION_READY: {
 #ifdef DEBUG_ENABLED
-			connect("ready", callable_mp(this, &Control::_clear_size_warning), CONNECT_DEFERRED | CONNECT_ONESHOT);
+			connect("ready", callable_mp(this, &Control::_clear_size_warning), CONNECT_DEFERRED | CONNECT_ONE_SHOT);
 #endif
 		} break;
 
@@ -3182,8 +2912,8 @@ void Control::_notification(int p_notification) {
 			if (data.parent_canvas_item) {
 				data.parent_canvas_item->disconnect("item_rect_changed", callable_mp(this, &Control::_size_changed));
 				data.parent_canvas_item = nullptr;
-			} else if (!is_set_as_top_level()) {
-				//disconnect viewport
+			} else {
+				// Disconnect viewport.
 				Viewport *viewport = get_viewport();
 				ERR_FAIL_COND(!viewport);
 				viewport->disconnect("size_changed", callable_mp(this, &Control::_size_changed));
@@ -3209,7 +2939,7 @@ void Control::_notification(int p_notification) {
 			queue_redraw();
 
 			if (data.RI) {
-				get_viewport()->_gui_set_root_order_dirty();
+				get_viewport()->gui_set_root_order_dirty();
 			}
 		} break;
 
@@ -3430,6 +3160,9 @@ void Control::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("warp_mouse", "position"), &Control::warp_mouse);
 
+	ClassDB::bind_method(D_METHOD("set_shortcut_context", "node"), &Control::set_shortcut_context);
+	ClassDB::bind_method(D_METHOD("get_shortcut_context"), &Control::get_shortcut_context);
+
 	ClassDB::bind_method(D_METHOD("update_minimum_size"), &Control::update_minimum_size);
 
 	ClassDB::bind_method(D_METHOD("set_layout_direction", "direction"), &Control::set_layout_direction);
@@ -3438,6 +3171,9 @@ void Control::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_auto_translate", "enable"), &Control::set_auto_translate);
 	ClassDB::bind_method(D_METHOD("is_auto_translating"), &Control::is_auto_translating);
+
+	ClassDB::bind_method(D_METHOD("set_localize_numeral_system", "enable"), &Control::set_localize_numeral_system);
+	ClassDB::bind_method(D_METHOD("is_localizing_numeral_system"), &Control::is_localizing_numeral_system);
 
 	ADD_GROUP("Layout", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "clip_contents"), "set_clip_contents", "is_clipping_contents");
@@ -3455,10 +3191,10 @@ void Control::_bind_methods() {
 	ADD_PROPERTY_DEFAULT("anchors_preset", -1);
 
 	ADD_SUBGROUP_INDENT("Anchor Points", "anchor_", 1);
-	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_left", PROPERTY_HINT_RANGE, "0,1,0.001,or_lesser,or_greater"), "_set_anchor", "get_anchor", SIDE_LEFT);
-	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_top", PROPERTY_HINT_RANGE, "0,1,0.001,or_lesser,or_greater"), "_set_anchor", "get_anchor", SIDE_TOP);
-	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_right", PROPERTY_HINT_RANGE, "0,1,0.001,or_lesser,or_greater"), "_set_anchor", "get_anchor", SIDE_RIGHT);
-	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_bottom", PROPERTY_HINT_RANGE, "0,1,0.001,or_lesser,or_greater"), "_set_anchor", "get_anchor", SIDE_BOTTOM);
+	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_left", PROPERTY_HINT_RANGE, "0,1,0.001,or_less,or_greater"), "_set_anchor", "get_anchor", SIDE_LEFT);
+	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_top", PROPERTY_HINT_RANGE, "0,1,0.001,or_less,or_greater"), "_set_anchor", "get_anchor", SIDE_TOP);
+	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_right", PROPERTY_HINT_RANGE, "0,1,0.001,or_less,or_greater"), "_set_anchor", "get_anchor", SIDE_RIGHT);
+	ADD_PROPERTYI(PropertyInfo(Variant::FLOAT, "anchor_bottom", PROPERTY_HINT_RANGE, "0,1,0.001,or_less,or_greater"), "_set_anchor", "get_anchor", SIDE_BOTTOM);
 
 	ADD_SUBGROUP_INDENT("Anchor Offsets", "offset_", 1);
 	ADD_PROPERTYI(PropertyInfo(Variant::INT, "offset_left", PROPERTY_HINT_RANGE, "-4096,4096,suffix:px"), "set_offset", "get_offset", SIDE_LEFT);
@@ -3474,7 +3210,7 @@ void Control::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "size", PROPERTY_HINT_NONE, "suffix:px", PROPERTY_USAGE_EDITOR), "_set_size", "get_size");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "position", PROPERTY_HINT_NONE, "suffix:px", PROPERTY_USAGE_EDITOR), "_set_position", "get_position");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "global_position", PROPERTY_HINT_NONE, "suffix:px", PROPERTY_USAGE_NONE), "_set_global_position", "get_global_position");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "rotation", PROPERTY_HINT_RANGE, "-360,360,0.1,or_lesser,or_greater,radians"), "set_rotation", "get_rotation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "rotation", PROPERTY_HINT_RANGE, "-360,360,0.1,or_less,or_greater,radians"), "set_rotation", "get_rotation");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "scale"), "set_scale", "get_scale");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "pivot_offset", PROPERTY_HINT_NONE, "suffix:px"), "set_pivot_offset", "get_pivot_offset");
 
@@ -3483,8 +3219,9 @@ void Control::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "size_flags_vertical", PROPERTY_HINT_FLAGS, "Fill:1,Expand:2,Shrink Center:4,Shrink End:8"), "set_v_size_flags", "get_v_size_flags");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "size_flags_stretch_ratio", PROPERTY_HINT_RANGE, "0,20,0.01,or_greater"), "set_stretch_ratio", "get_stretch_ratio");
 
-	ADD_GROUP("Auto Translate", "");
+	ADD_GROUP("Localization", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "auto_translate"), "set_auto_translate", "is_auto_translating");
+	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "localize_numeral_system"), "set_localize_numeral_system", "is_localizing_numeral_system");
 
 	ADD_GROUP("Tooltip", "tooltip_");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "tooltip_text", PROPERTY_HINT_MULTILINE_TEXT), "set_tooltip_text", "get_tooltip_text");
@@ -3502,6 +3239,9 @@ void Control::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mouse_filter", PROPERTY_HINT_ENUM, "Stop,Pass,Ignore"), "set_mouse_filter", "get_mouse_filter");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "mouse_force_pass_scroll_events"), "set_force_pass_scroll_events", "is_force_pass_scroll_events");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "mouse_default_cursor_shape", PROPERTY_HINT_ENUM, "Arrow,I-Beam,Pointing Hand,Cross,Wait,Busy,Drag,Can Drop,Forbidden,Vertical Resize,Horizontal Resize,Secondary Diagonal Resize,Main Diagonal Resize,Move,Vertical Split,Horizontal Split,Help"), "set_default_cursor_shape", "get_default_cursor_shape");
+
+	ADD_GROUP("Input", "");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "shortcut_context", PROPERTY_HINT_NODE_TYPE, "Node"), "set_shortcut_context", "get_shortcut_context");
 
 	ADD_GROUP("Theme", "theme_");
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "theme", PROPERTY_HINT_RESOURCE_TYPE, "Theme"), "set_theme", "get_theme");
@@ -3611,7 +3351,13 @@ void Control::_bind_methods() {
 	GDVIRTUAL_BIND(_gui_input, "event");
 }
 
+Control::Control() {
+	data.theme_owner = memnew(ThemeOwner);
+}
+
 Control::~Control() {
+	memdelete(data.theme_owner);
+
 	// Resources need to be disconnected.
 	for (KeyValue<StringName, Ref<Texture2D>> &E : data.icon_override) {
 		E.value->disconnect("changed", callable_mp(this, &Control::_notify_theme_override_changed));

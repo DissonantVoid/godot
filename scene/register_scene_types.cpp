@@ -642,21 +642,22 @@ void register_scene_types() {
 	GDREGISTER_CLASS(VisualShaderNodeTexture2DArray);
 	GDREGISTER_CLASS(VisualShaderNodeTexture3D);
 	GDREGISTER_CLASS(VisualShaderNodeCubemap);
-	GDREGISTER_ABSTRACT_CLASS(VisualShaderNodeUniform);
-	GDREGISTER_CLASS(VisualShaderNodeUniformRef);
-	GDREGISTER_CLASS(VisualShaderNodeFloatUniform);
-	GDREGISTER_CLASS(VisualShaderNodeIntUniform);
-	GDREGISTER_CLASS(VisualShaderNodeBooleanUniform);
-	GDREGISTER_CLASS(VisualShaderNodeColorUniform);
-	GDREGISTER_CLASS(VisualShaderNodeVec2Uniform);
-	GDREGISTER_CLASS(VisualShaderNodeVec3Uniform);
-	GDREGISTER_CLASS(VisualShaderNodeVec4Uniform);
-	GDREGISTER_CLASS(VisualShaderNodeTransformUniform);
-	GDREGISTER_CLASS(VisualShaderNodeTextureUniform);
-	GDREGISTER_CLASS(VisualShaderNodeTextureUniformTriplanar);
-	GDREGISTER_CLASS(VisualShaderNodeTexture2DArrayUniform);
-	GDREGISTER_CLASS(VisualShaderNodeTexture3DUniform);
-	GDREGISTER_CLASS(VisualShaderNodeCubemapUniform);
+	GDREGISTER_ABSTRACT_CLASS(VisualShaderNodeParameter);
+	GDREGISTER_CLASS(VisualShaderNodeParameterRef);
+	GDREGISTER_CLASS(VisualShaderNodeFloatParameter);
+	GDREGISTER_CLASS(VisualShaderNodeIntParameter);
+	GDREGISTER_CLASS(VisualShaderNodeBooleanParameter);
+	GDREGISTER_CLASS(VisualShaderNodeColorParameter);
+	GDREGISTER_CLASS(VisualShaderNodeVec2Parameter);
+	GDREGISTER_CLASS(VisualShaderNodeVec3Parameter);
+	GDREGISTER_CLASS(VisualShaderNodeVec4Parameter);
+	GDREGISTER_CLASS(VisualShaderNodeTransformParameter);
+	GDREGISTER_ABSTRACT_CLASS(VisualShaderNodeTextureParameter);
+	GDREGISTER_CLASS(VisualShaderNodeTexture2DParameter);
+	GDREGISTER_CLASS(VisualShaderNodeTextureParameterTriplanar);
+	GDREGISTER_CLASS(VisualShaderNodeTexture2DArrayParameter);
+	GDREGISTER_CLASS(VisualShaderNodeTexture3DParameter);
+	GDREGISTER_CLASS(VisualShaderNodeCubemapParameter);
 	GDREGISTER_CLASS(VisualShaderNodeLinearSceneDepth);
 	GDREGISTER_CLASS(VisualShaderNodeIf);
 	GDREGISTER_CLASS(VisualShaderNodeSwitch);
@@ -793,6 +794,7 @@ void register_scene_types() {
 	GDREGISTER_CLASS(CylinderMesh);
 	GDREGISTER_CLASS(PlaneMesh);
 	GDREGISTER_CLASS(PrismMesh);
+	GDREGISTER_CLASS(QuadMesh);
 	GDREGISTER_CLASS(SphereMesh);
 	GDREGISTER_CLASS(TextMesh);
 	GDREGISTER_CLASS(TorusMesh);
@@ -958,7 +960,7 @@ void register_scene_types() {
 	ClassDB::add_compatibility_class("Navigation3D", "Node3D");
 	ClassDB::add_compatibility_class("Navigation2D", "Node2D");
 	ClassDB::add_compatibility_class("OpenSimplexNoise", "FastNoiseLite");
-	ClassDB::add_compatibility_class("QuadMesh", "PlaneMesh");
+	ClassDB::add_compatibility_class("ProximityGroup", "Node3D");
 	ClassDB::add_compatibility_class("ToolButton", "Button");
 	ClassDB::add_compatibility_class("YSort", "Node2D");
 	// Portal and room occlusion was replaced by raster occlusion (OccluderInstance3D node).
@@ -1088,10 +1090,12 @@ void register_scene_types() {
 	ClassDB::add_compatibility_class("VisibilityNotifier2D", "VisibleOnScreenNotifier2D");
 	ClassDB::add_compatibility_class("VisibilityNotifier3D", "VisibleOnScreenNotifier3D");
 	ClassDB::add_compatibility_class("VisualServer", "RenderingServer");
+	ClassDB::add_compatibility_class("World", "World3D");
+
+	// VisualShader classes.
 	ClassDB::add_compatibility_class("VisualShaderNodeScalarConstant", "VisualShaderNodeFloatConstant");
 	ClassDB::add_compatibility_class("VisualShaderNodeScalarFunc", "VisualShaderNodeFloatFunc");
 	ClassDB::add_compatibility_class("VisualShaderNodeScalarOp", "VisualShaderNodeFloatOp");
-	ClassDB::add_compatibility_class("VisualShaderNodeScalarUniform", "VisualShaderNodeFloatUniform");
 	ClassDB::add_compatibility_class("VisualShaderNodeScalarClamp", "VisualShaderNodeClamp");
 	ClassDB::add_compatibility_class("VisualShaderNodeVectorClamp", "VisualShaderNodeClamp");
 	ClassDB::add_compatibility_class("VisualShaderNodeScalarInterp", "VisualShaderNodeMix");
@@ -1105,7 +1109,17 @@ void register_scene_types() {
 	ClassDB::add_compatibility_class("VisualShaderNodeScalarTransformMult", "VisualShaderNodeTransformOp");
 	ClassDB::add_compatibility_class("VisualShaderNodeScalarDerivativeFunc", "VisualShaderNodeDerivativeFunc");
 	ClassDB::add_compatibility_class("VisualShaderNodeVectorDerivativeFunc", "VisualShaderNodeDerivativeFunc");
-	ClassDB::add_compatibility_class("World", "World3D");
+
+	ClassDB::add_compatibility_class("VisualShaderNodeBooleanUniform", "VisualShaderNodeBooleanParameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeColorUniform", "VisualShaderNodeColorParameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeScalarUniform", "VisualShaderNodeFloatParameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeCubeMapUniform", "VisualShaderNodeCubeMapParameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeTextureUniform", "VisualShaderNodeTexture2DParameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeTextureUniformTriplanar", "VisualShaderNodeTextureParameterTriplanar");
+	ClassDB::add_compatibility_class("VisualShaderNodeTransformUniform", "VisualShaderNodeTransformParameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeVec3Uniform", "VisualShaderNodeVec3Parameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeUniform", "VisualShaderNodeParameter");
+	ClassDB::add_compatibility_class("VisualShaderNodeUniformRef", "VisualShaderNodeParameterRef");
 
 	// Renamed during 4.0 alpha, added to ease transition between alphas.
 	ClassDB::add_compatibility_class("AudioStreamOGGVorbis", "AudioStreamOggVorbis");
@@ -1117,6 +1131,7 @@ void register_scene_types() {
 	ClassDB::add_compatibility_class("StreamTexture2DArray", "CompressedTexture2DArray");
 	ClassDB::add_compatibility_class("StreamTexture3D", "CompressedTexture3D");
 	ClassDB::add_compatibility_class("StreamTextureLayered", "CompressedTextureLayered");
+	ClassDB::add_compatibility_class("VisualShaderNodeFloatUniform", "VisualShaderNodeFloatParameter");
 #endif /* DISABLE_DEPRECATED */
 
 	OS::get_singleton()->yield(); // may take time to init
@@ -1170,7 +1185,7 @@ void unregister_scene_types() {
 	ResourceLoader::remove_resource_format_loader(resource_loader_shader_include);
 	resource_loader_shader_include.unref();
 
-	// StandardMaterial3D is not initialised when 3D is disabled, so it shouldn't be cleaned up either
+	// StandardMaterial3D is not initialized when 3D is disabled, so it shouldn't be cleaned up either
 #ifndef _3D_DISABLED
 	BaseMaterial3D::finish_shaders();
 	PhysicalSkyMaterial::cleanup_shader();

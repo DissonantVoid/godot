@@ -39,13 +39,13 @@
 #include "core/templates/pass_func.h"
 #include "core/templates/rid_owner.h"
 #include "core/templates/self_list.h"
-#include "servers/rendering/renderer_scene.h"
 #include "servers/rendering/renderer_scene_occlusion_cull.h"
 #include "servers/rendering/renderer_scene_render.h"
+#include "servers/rendering/rendering_method.h"
 #include "servers/rendering/storage/utilities.h"
 #include "servers/xr/xr_interface.h"
 
-class RendererSceneCull : public RendererScene {
+class RendererSceneCull : public RenderingMethod {
 public:
 	RendererSceneRender *scene_render = nullptr;
 
@@ -970,10 +970,10 @@ public:
 
 	void _update_instance_shader_uniforms_from_material(HashMap<StringName, Instance::InstanceShaderParameter> &isparams, const HashMap<StringName, Instance::InstanceShaderParameter> &existing_isparams, RID p_material);
 
-	virtual void instance_geometry_set_shader_uniform(RID p_instance, const StringName &p_parameter, const Variant &p_value);
-	virtual void instance_geometry_get_shader_uniform_list(RID p_instance, List<PropertyInfo> *p_parameters) const;
-	virtual Variant instance_geometry_get_shader_uniform(RID p_instance, const StringName &p_parameter) const;
-	virtual Variant instance_geometry_get_shader_uniform_default_value(RID p_instance, const StringName &p_parameter) const;
+	virtual void instance_geometry_set_shader_parameter(RID p_instance, const StringName &p_parameter, const Variant &p_value);
+	virtual void instance_geometry_get_shader_parameter_list(RID p_instance, List<PropertyInfo> *p_parameters) const;
+	virtual Variant instance_geometry_get_shader_parameter(RID p_instance, const StringName &p_parameter) const;
+	virtual Variant instance_geometry_get_shader_parameter_default_value(RID p_instance, const StringName &p_parameter) const;
 
 	_FORCE_INLINE_ void _update_instance(Instance *p_instance);
 	_FORCE_INLINE_ void _update_instance_aabb(Instance *p_instance);
@@ -1058,13 +1058,13 @@ public:
 	void _render_scene(const RendererSceneRender::CameraData *p_camera_data, const Ref<RenderSceneBuffers> &p_render_buffers, RID p_environment, RID p_force_camera_attributes, uint32_t p_visible_layers, RID p_scenario, RID p_viewport, RID p_shadow_atlas, RID p_reflection_probe, int p_reflection_probe_pass, float p_screen_mesh_lod_threshold, bool p_using_shadows = true, RenderInfo *r_render_info = nullptr);
 	void render_empty_scene(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_scenario, RID p_shadow_atlas);
 
-	void render_camera(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_camera, RID p_scenario, RID p_viewport, Size2 p_viewport_size, bool p_use_taa, float p_screen_mesh_lod_threshold, RID p_shadow_atlas, Ref<XRInterface> &p_xr_interface, RendererScene::RenderInfo *r_render_info = nullptr);
+	void render_camera(const Ref<RenderSceneBuffers> &p_render_buffers, RID p_camera, RID p_scenario, RID p_viewport, Size2 p_viewport_size, bool p_use_taa, float p_screen_mesh_lod_threshold, RID p_shadow_atlas, Ref<XRInterface> &p_xr_interface, RenderingMethod::RenderInfo *r_render_info = nullptr);
 	void update_dirty_instances();
 
 	void render_particle_colliders();
 	virtual void render_probes();
 
-	TypedArray<Image> bake_render_uv2(RID p_base, const Vector<RID> &p_material_overrides, const Size2i &p_image_size);
+	TypedArray<Image> bake_render_uv2(RID p_base, const TypedArray<RID> &p_material_overrides, const Size2i &p_image_size);
 
 	//pass to scene render
 
@@ -1076,7 +1076,6 @@ public:
 
 #define PASSBASE scene_render
 
-	PASS2(directional_shadow_atlas_set_size, int, bool)
 	PASS1(voxel_gi_set_quality, RS::VoxelGIQuality)
 
 	/* SKY API */
@@ -1258,11 +1257,7 @@ public:
 	PASS0R(Ref<RenderSceneBuffers>, render_buffers_create)
 	PASS1(gi_set_use_half_resolution, bool)
 
-	/* Shadow Atlas */
-	PASS0R(RID, shadow_atlas_create)
-	PASS3(shadow_atlas_set_size, RID, int, bool)
-	PASS3(shadow_atlas_set_quadrant_subdivision, RID, int, int)
-
+	/* Misc */
 	PASS1(set_debug_draw_mode, RS::ViewportDebugDraw)
 
 	PASS1(decals_set_filter, RS::DecalFilter)

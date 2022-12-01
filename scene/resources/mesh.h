@@ -35,8 +35,11 @@
 #include "core/math/face3.h"
 #include "core/math/triangle_mesh.h"
 #include "scene/resources/material.h"
-#include "scene/resources/shape_3d.h"
 #include "servers/rendering_server.h"
+
+class ConcavePolygonShape3D;
+class ConvexPolygonShape3D;
+class Shape3D;
 
 class Mesh : public Resource {
 	GDCLASS(Mesh, Resource);
@@ -211,8 +214,8 @@ public:
 	static ConvexDecompositionFunc convex_decomposition_function;
 
 	Vector<Ref<Shape3D>> convex_decompose(const ConvexDecompositionSettings &p_settings) const;
-	Ref<Shape3D> create_convex_shape(bool p_clean = true, bool p_simplify = false) const;
-	Ref<Shape3D> create_trimesh_shape() const;
+	Ref<ConvexPolygonShape3D> create_convex_shape(bool p_clean = true, bool p_simplify = false) const;
+	Ref<ConcavePolygonShape3D> create_trimesh_shape() const;
 
 	virtual int get_builtin_bind_pose_count() const;
 	virtual Transform3D get_builtin_bind_pose(int p_index) const;
@@ -265,7 +268,7 @@ protected:
 	static void _bind_methods();
 
 public:
-	void add_surface_from_arrays(PrimitiveType p_primitive, const Array &p_arrays, const Array &p_blend_shapes = Array(), const Dictionary &p_lods = Dictionary(), uint32_t p_flags = 0);
+	void add_surface_from_arrays(PrimitiveType p_primitive, const Array &p_arrays, const TypedArray<Array> &p_blend_shapes = TypedArray<Array>(), const Dictionary &p_lods = Dictionary(), uint32_t p_flags = 0);
 
 	void add_surface(uint32_t p_format, PrimitiveType p_primitive, const Vector<uint8_t> &p_array, const Vector<uint8_t> &p_attribute_array, const Vector<uint8_t> &p_skin_array, int p_vertex_count, const Vector<uint8_t> &p_index_array, int p_index_count, const AABB &p_aabb, const Vector<uint8_t> &p_blend_shape_data = Vector<uint8_t>(), const Vector<AABB> &p_bone_aabbs = Vector<AABB>(), const Vector<RS::SurfaceData::LOD> &p_lods = Vector<RS::SurfaceData::LOD>());
 

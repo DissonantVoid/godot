@@ -22,9 +22,12 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
 
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
   <PropertyGroup>
     <DefineConstants>$(DefineConstants);GODOT</DefineConstants>
+    <DefineConstants Condition=" '$(GodotFloat64)' == 'true' ">REAL_T_IS_DOUBLE;$(DefineConstants)</DefineConstants>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\GodotSharp\GodotSharp.csproj">

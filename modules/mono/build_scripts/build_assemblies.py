@@ -5,6 +5,7 @@ import os.path
 import shlex
 import subprocess
 from dataclasses import dataclass
+from typing import Optional, List
 
 
 def find_dotnet_cli():
@@ -150,10 +151,7 @@ def find_any_msbuild_tool(mono_prefix):
     return None
 
 
-def run_msbuild(tools: ToolsLocation, sln: str, msbuild_args: [str] = None):
-    if msbuild_args is None:
-        msbuild_args = []
-
+def run_msbuild(tools: ToolsLocation, sln: str, msbuild_args: Optional[List[str]] = None):
     using_msbuild_mono = False
 
     # Preference order: dotnet CLI > Standalone MSBuild > Mono's MSBuild
@@ -169,7 +167,7 @@ def run_msbuild(tools: ToolsLocation, sln: str, msbuild_args: [str] = None):
 
     args += [sln]
 
-    if len(msbuild_args) > 0:
+    if msbuild_args:
         args += msbuild_args
 
     print("Running MSBuild: ", " ".join(shlex.quote(arg) for arg in args), flush=True)
@@ -195,7 +193,7 @@ def run_msbuild(tools: ToolsLocation, sln: str, msbuild_args: [str] = None):
     return subprocess.call(args, env=msbuild_env)
 
 
-def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local):
+def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, float_size):
     target_filenames = [
         "GodotSharp.dll",
         "GodotSharp.pdb",
@@ -216,6 +214,8 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local):
         args = ["/restore", "/t:Build", "/p:Configuration=" + build_config, "/p:NoWarn=1591"]
         if push_nupkgs_local:
             args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
+        if float_size == "64":
+            args += ["/p:GodotFloat64=true"]
 
         sln = os.path.join(module_dir, "glue/GodotSharp/GodotSharp.sln")
         exit_code = run_msbuild(
@@ -256,9 +256,59 @@ def build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local):
     return 0
 
 
-def build_all(msbuild_tool, module_dir, output_dir, godot_platform, dev_debug, push_nupkgs_local):
+def generate_sdk_package_versions():
+    # I can't believe importing files in Python is so convoluted when not
+    # following the golden standard for packages/modules.
+    import os
+    import sys
+    from os.path import dirname
+
+    # We want ../../../methods.py.
+    script_path = dirname(os.path.abspath(__file__))
+    root_path = dirname(dirname(dirname(script_path)))
+
+    sys.path.insert(0, root_path)
+    from methods import get_version_info
+
+    version_info = get_version_info("")
+    sys.path.remove(root_path)
+
+    version_str = "{major}.{minor}.{patch}".format(**version_info)
+    version_status = version_info["status"]
+    if version_status != "stable":  # Pre-release
+        # If version was overridden to be e.g. "beta3", we insert a dot between
+        # "beta" and "3" to follow SemVer 2.0.
+        import re
+
+        match = re.search(r"[\d]+$", version_status)
+        if match:
+            pos = match.start()
+            version_status = version_status[:pos] + "." + version_status[pos:]
+        version_str += "-" + version_status
+
+    props = """<Project>
+  <PropertyGroup>
+    <PackageVersion_GodotSharp>{0}</PackageVersion_GodotSharp>
+    <PackageVersion_Godot_NET_Sdk>{0}</PackageVersion_Godot_NET_Sdk>
+    <PackageVersion_Godot_SourceGenerators>{0}</PackageVersion_Godot_SourceGenerators>
+  </PropertyGroup>
+</Project>
+""".format(
+        version_str
+    )
+
+    # We write in ../SdkPackageVersions.props.
+    with open(os.path.join(dirname(script_path), "SdkPackageVersions.props"), "w") as f:
+        f.write(props)
+        f.close()
+
+
+def build_all(msbuild_tool, module_dir, output_dir, godot_platform, dev_debug, push_nupkgs_local, float_size):
+    # Generate SdkPackageVersions.props
+    generate_sdk_package_versions()
+
     # Godot API
-    exit_code = build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local)
+    exit_code = build_godot_api(msbuild_tool, module_dir, output_dir, push_nupkgs_local, float_size)
     if exit_code != 0:
         return exit_code
 
@@ -269,6 +319,8 @@ def build_all(msbuild_tool, module_dir, output_dir, godot_platform, dev_debug, p
     )
     if push_nupkgs_local:
         args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
+    if float_size == "64":
+        args += ["/p:GodotFloat64=true"]
     exit_code = run_msbuild(msbuild_tool, sln=sln, msbuild_args=args)
     if exit_code != 0:
         return exit_code
@@ -277,6 +329,8 @@ def build_all(msbuild_tool, module_dir, output_dir, godot_platform, dev_debug, p
     args = ["/restore", "/t:Build", "/p:Configuration=Release"]
     if push_nupkgs_local:
         args += ["/p:ClearNuGetLocalCache=true", "/p:PushNuGetToLocalSource=" + push_nupkgs_local]
+    if float_size == "64":
+        args += ["/p:GodotFloat64=true"]
     sln = os.path.join(module_dir, "editor/Godot.NET.Sdk/Godot.NET.Sdk.sln")
     exit_code = run_msbuild(msbuild_tool, sln=sln, msbuild_args=args)
     if exit_code != 0:
@@ -300,6 +354,7 @@ def main():
     parser.add_argument("--godot-platform", type=str, default="")
     parser.add_argument("--mono-prefix", type=str, default="")
     parser.add_argument("--push-nupkgs-local", type=str, default="")
+    parser.add_argument("--float", type=str, default="32", choices=["32", "64"], help="Floating-point precision")
 
     args = parser.parse_args()
 
@@ -307,6 +362,8 @@ def main():
     module_dir = os.path.abspath(os.path.join(this_script_dir, os.pardir))
 
     output_dir = os.path.abspath(args.godot_output_dir)
+
+    push_nupkgs_local = os.path.abspath(args.push_nupkgs_local) if args.push_nupkgs_local else None
 
     msbuild_tool = find_any_msbuild_tool(args.mono_prefix)
 
@@ -320,7 +377,8 @@ def main():
         output_dir,
         args.godot_platform,
         args.dev_debug,
-        args.push_nupkgs_local,
+        push_nupkgs_local,
+        args.float,
     )
     sys.exit(exit_code)
 

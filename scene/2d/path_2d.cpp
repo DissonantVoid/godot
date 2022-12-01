@@ -175,51 +175,18 @@ void PathFollow2D::_update_transform() {
 	if (path_length == 0) {
 		return;
 	}
-	Vector2 pos = c->sample_baked(progress, cubic);
 
 	if (rotates) {
-		real_t ahead = progress + lookahead;
-
-		if (loop && ahead >= path_length) {
-			// If our lookahead will loop, we need to check if the path is closed.
-			int point_count = c->get_point_count();
-			if (point_count > 0) {
-				Vector2 start_point = c->get_point_position(0);
-				Vector2 end_point = c->get_point_position(point_count - 1);
-				if (start_point == end_point) {
-					// Since the path is closed we want to 'smooth off'
-					// the corner at the start/end.
-					// So we wrap the lookahead back round.
-					ahead = Math::fmod(ahead, path_length);
-				}
-			}
-		}
-
-		Vector2 ahead_pos = c->sample_baked(ahead, cubic);
-
-		Vector2 tangent_to_curve;
-		if (ahead_pos == pos) {
-			// This will happen at the end of non-looping or non-closed paths.
-			// We'll try a look behind instead, in order to get a meaningful angle.
-			tangent_to_curve =
-					(pos - c->sample_baked(progress - lookahead, cubic)).normalized();
-		} else {
-			tangent_to_curve = (ahead_pos - pos).normalized();
-		}
-
-		Vector2 normal_of_curve = -tangent_to_curve.orthogonal();
-
-		pos += tangent_to_curve * h_offset;
-		pos += normal_of_curve * v_offset;
-
-		set_rotation(tangent_to_curve.angle());
-
+		Transform2D xform = c->sample_baked_with_rotation(progress, cubic, loop, lookahead);
+		xform.translate_local(v_offset, h_offset);
+		set_rotation(xform[1].angle());
+		set_position(xform[2]);
 	} else {
+		Vector2 pos = c->sample_baked(progress, cubic);
 		pos.x += h_offset;
 		pos.y += v_offset;
+		set_position(pos);
 	}
-
-	set_position(pos);
 }
 
 void PathFollow2D::_notification(int p_what) {
@@ -252,12 +219,12 @@ void PathFollow2D::_validate_property(PropertyInfo &p_property) const {
 			max = path->get_curve()->get_baked_length();
 		}
 
-		p_property.hint_string = "0," + rtos(max) + ",0.01,or_lesser,or_greater";
+		p_property.hint_string = "0," + rtos(max) + ",0.01,or_less,or_greater";
 	}
 }
 
-TypedArray<String> PathFollow2D::get_configuration_warnings() const {
-	TypedArray<String> warnings = Node::get_configuration_warnings();
+PackedStringArray PathFollow2D::get_configuration_warnings() const {
+	PackedStringArray warnings = Node::get_configuration_warnings();
 
 	if (is_visible_in_tree() && is_inside_tree()) {
 		if (!Object::cast_to<Path2D>(get_parent())) {
@@ -293,8 +260,8 @@ void PathFollow2D::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_lookahead", "lookahead"), &PathFollow2D::set_lookahead);
 	ClassDB::bind_method(D_METHOD("get_lookahead"), &PathFollow2D::get_lookahead);
 
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "progress", PROPERTY_HINT_RANGE, "0,10000,0.01,or_lesser,or_greater,suffix:px"), "set_progress", "get_progress");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "progress_ratio", PROPERTY_HINT_RANGE, "0,1,0.0001,or_lesser,or_greater", PROPERTY_USAGE_EDITOR), "set_progress_ratio", "get_progress_ratio");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "progress", PROPERTY_HINT_RANGE, "0,10000,0.01,or_less,or_greater,suffix:px"), "set_progress", "get_progress");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "progress_ratio", PROPERTY_HINT_RANGE, "0,1,0.0001,or_less,or_greater", PROPERTY_USAGE_EDITOR), "set_progress_ratio", "get_progress_ratio");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "h_offset"), "set_h_offset", "get_h_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "v_offset"), "set_v_offset", "get_v_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "rotates"), "set_rotates", "is_rotating");

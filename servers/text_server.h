@@ -230,6 +230,7 @@ public:
 	virtual String tag_to_name(int64_t p_tag) const { return ""; };
 
 	/* Font interface */
+
 	virtual RID create_font() = 0;
 
 	virtual void font_set_data(const RID &p_font_rid, const PackedByteArray &p_data) = 0;
@@ -249,8 +250,8 @@ public:
 	virtual void font_set_style_name(const RID &p_font_rid, const String &p_name) = 0;
 	virtual String font_get_style_name(const RID &p_font_rid) const = 0;
 
-	virtual void font_set_antialiasing(RID p_font_rid, FontAntialiasing p_antialiasing) = 0;
-	virtual FontAntialiasing font_get_antialiasing(RID p_font_rid) const = 0;
+	virtual void font_set_antialiasing(const RID &p_font_rid, FontAntialiasing p_antialiasing) = 0;
+	virtual FontAntialiasing font_get_antialiasing(const RID &p_font_rid) const = 0;
 
 	virtual void font_set_generate_mipmaps(const RID &p_font_rid, bool p_generate_mipmaps) = 0;
 	virtual bool font_get_generate_mipmaps(const RID &p_font_rid) const = 0;
@@ -409,13 +410,13 @@ public:
 	virtual void shaped_text_set_spacing(const RID &p_shaped, SpacingType p_spacing, int64_t p_value) = 0;
 	virtual int64_t shaped_text_get_spacing(const RID &p_shaped, SpacingType p_spacing) const = 0;
 
-	virtual bool shaped_text_add_string(const RID &p_shaped, const String &p_text, const Array &p_fonts, int64_t p_size, const Dictionary &p_opentype_features = Dictionary(), const String &p_language = "", const Variant &p_meta = Variant()) = 0;
+	virtual bool shaped_text_add_string(const RID &p_shaped, const String &p_text, const TypedArray<RID> &p_fonts, int64_t p_size, const Dictionary &p_opentype_features = Dictionary(), const String &p_language = "", const Variant &p_meta = Variant()) = 0;
 	virtual bool shaped_text_add_object(const RID &p_shaped, const Variant &p_key, const Size2 &p_size, InlineAlignment p_inline_align = INLINE_ALIGNMENT_CENTER, int64_t p_length = 1) = 0;
 	virtual bool shaped_text_resize_object(const RID &p_shaped, const Variant &p_key, const Size2 &p_size, InlineAlignment p_inline_align = INLINE_ALIGNMENT_CENTER) = 0;
 
 	virtual int64_t shaped_get_span_count(const RID &p_shaped) const = 0;
 	virtual Variant shaped_get_span_meta(const RID &p_shaped, int64_t p_index) const = 0;
-	virtual void shaped_set_span_update_font(const RID &p_shaped, int64_t p_index, const Array &p_fonts, int64_t p_size, const Dictionary &p_opentype_features = Dictionary()) = 0;
+	virtual void shaped_set_span_update_font(const RID &p_shaped, int64_t p_index, const TypedArray<RID> &p_fonts, int64_t p_size, const Dictionary &p_opentype_features = Dictionary()) = 0;
 
 	virtual RID shaped_text_substr(const RID &p_shaped, int64_t p_start, int64_t p_length) const = 0; // Copy shaped substring (e.g. line break) without reshaping, but correctly reordered, preservers range.
 	virtual RID shaped_text_get_parent(const RID &p_shaped) const = 0;
@@ -485,7 +486,7 @@ public:
 	// String functions.
 	virtual PackedInt32Array string_get_word_breaks(const String &p_string, const String &p_language = "") const = 0;
 
-	virtual int is_confusable(const String &p_string, const PackedStringArray &p_dict) const { return -1; };
+	virtual int64_t is_confusable(const String &p_string, const PackedStringArray &p_dict) const { return -1; };
 	virtual bool spoof_check(const String &p_string) const { return false; };
 
 	virtual String strip_diacritics(const String &p_string) const;

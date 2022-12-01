@@ -38,6 +38,7 @@
 #include "scene/gui/control.h"
 #include "scene/scene_string_names.h"
 #include "scene/theme/theme_db.h"
+#include "scene/theme/theme_owner.h"
 
 void Window::set_title(const String &p_title) {
 	title = p_title;
@@ -156,26 +157,18 @@ void Window::set_flag(Flags p_flag, bool p_enabled) {
 		embedder->_sub_window_update(this);
 
 	} else if (window_id != DisplayServer::INVALID_WINDOW_ID) {
-#ifdef TOOLS_ENABLED
-		if ((p_flag != FLAG_POPUP) || !(Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this))) {
+		if (!is_in_edited_scene_root()) {
 			DisplayServer::get_singleton()->window_set_flag(DisplayServer::WindowFlags(p_flag), p_enabled, window_id);
 		}
-#else
-		DisplayServer::get_singleton()->window_set_flag(DisplayServer::WindowFlags(p_flag), p_enabled, window_id);
-#endif
 	}
 }
 
 bool Window::get_flag(Flags p_flag) const {
 	ERR_FAIL_INDEX_V(p_flag, FLAG_MAX, false);
 	if (window_id != DisplayServer::INVALID_WINDOW_ID) {
-#ifdef TOOLS_ENABLED
-		if ((p_flag != FLAG_POPUP) || !(Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this))) {
+		if (!is_in_edited_scene_root()) {
 			flags[p_flag] = DisplayServer::get_singleton()->window_get_flag(DisplayServer::WindowFlags(p_flag), window_id);
 		}
-#else
-		flags[p_flag] = DisplayServer::get_singleton()->window_get_flag(DisplayServer::WindowFlags(p_flag), window_id);
-#endif
 	}
 	return flags[p_flag];
 }
@@ -231,6 +224,14 @@ bool Window::is_embedded() const {
 	return _get_embedder() != nullptr;
 }
 
+bool Window::is_in_edited_scene_root() const {
+#ifdef TOOLS_ENABLED
+	return (Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this));
+#else
+	return false;
+#endif
+}
+
 void Window::_make_window() {
 	ERR_FAIL_COND(window_id != DisplayServer::INVALID_WINDOW_ID);
 
@@ -258,15 +259,12 @@ void Window::_make_window() {
 #endif
 	DisplayServer::get_singleton()->window_set_title(tr_title, window_id);
 	DisplayServer::get_singleton()->window_attach_instance_id(get_instance_id(), window_id);
-#ifdef TOOLS_ENABLED
-	if (!(Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this))) {
-		DisplayServer::get_singleton()->window_set_exclusive(window_id, exclusive);
-	} else {
+
+	if (is_in_edited_scene_root()) {
 		DisplayServer::get_singleton()->window_set_exclusive(window_id, false);
+	} else {
+		DisplayServer::get_singleton()->window_set_exclusive(window_id, exclusive);
 	}
-#else
-	DisplayServer::get_singleton()->window_set_exclusive(window_id, exclusive);
-#endif
 
 	_update_window_size();
 
@@ -388,7 +386,22 @@ void Window::_event_callback(DisplayServer::WindowEvent p_event) {
 			_propagate_window_notification(this, NOTIFICATION_WM_DPI_CHANGE);
 			emit_signal(SNAME("dpi_changed"));
 		} break;
+		case DisplayServer::WINDOW_EVENT_TITLEBAR_CHANGE: {
+			emit_signal(SNAME("titlebar_changed"));
+		} break;
 	}
+}
+
+void Window::update_mouse_cursor_shape() {
+	// The default shape is set in Viewport::_gui_input_event. To instantly
+	// see the shape in the viewport we need to trigger a mouse motion event.
+	Ref<InputEventMouseMotion> mm;
+	Vector2 pos = get_mouse_position();
+	Transform2D xform = get_global_canvas_transform().affine_inverse();
+	mm.instantiate();
+	mm->set_position(pos);
+	mm->set_global_position(xform.xform(pos));
+	push_input(mm);
 }
 
 void Window::show() {
@@ -449,14 +462,10 @@ void Window::set_visible(bool p_visible) {
 	//update transient exclusive
 	if (transient_parent) {
 		if (exclusive && visible) {
-#ifdef TOOLS_ENABLED
-			if (!(Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this))) {
+			if (!is_in_edited_scene_root()) {
 				ERR_FAIL_COND_MSG(transient_parent->exclusive_child && transient_parent->exclusive_child != this, "Transient parent has another exclusive child.");
 				transient_parent->exclusive_child = this;
 			}
-#else
-			transient_parent->exclusive_child = this;
-#endif
 		} else {
 			if (transient_parent->exclusive_child == this) {
 				transient_parent->exclusive_child = nullptr;
@@ -503,13 +512,9 @@ void Window::_make_transient() {
 		window->transient_children.insert(this);
 		if (is_inside_tree() && is_visible() && exclusive) {
 			if (transient_parent->exclusive_child == nullptr) {
-#ifdef TOOLS_ENABLED
-				if (!(Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this))) {
+				if (!is_in_edited_scene_root()) {
 					transient_parent->exclusive_child = this;
 				}
-#else
-				transient_parent->exclusive_child = this;
-#endif
 			} else if (transient_parent->exclusive_child != this) {
 				ERR_PRINT("Making child transient exclusive, but parent has another exclusive child");
 			}
@@ -552,27 +557,19 @@ void Window::set_exclusive(bool p_exclusive) {
 	exclusive = p_exclusive;
 
 	if (!embedder && window_id != DisplayServer::INVALID_WINDOW_ID) {
-#ifdef TOOLS_ENABLED
-		if (!(Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this))) {
-			DisplayServer::get_singleton()->window_set_exclusive(window_id, exclusive);
-		} else {
+		if (is_in_edited_scene_root()) {
 			DisplayServer::get_singleton()->window_set_exclusive(window_id, false);
+		} else {
+			DisplayServer::get_singleton()->window_set_exclusive(window_id, exclusive);
 		}
-#else
-		DisplayServer::get_singleton()->window_set_exclusive(window_id, exclusive);
-#endif
 	}
 
 	if (transient_parent) {
 		if (p_exclusive && is_inside_tree() && is_visible()) {
 			ERR_FAIL_COND_MSG(transient_parent->exclusive_child && transient_parent->exclusive_child != this, "Transient parent has another exclusive child.");
-#ifdef TOOLS_ENABLED
-			if (!(Engine::get_singleton()->is_editor_hint() && get_tree()->get_edited_scene_root() && (get_tree()->get_edited_scene_root()->is_ancestor_of(this) || get_tree()->get_edited_scene_root() == this))) {
+			if (!is_in_edited_scene_root()) {
 				transient_parent->exclusive_child = this;
 			}
-#else
-			transient_parent->exclusive_child = this;
-#endif
 		} else {
 			if (transient_parent->exclusive_child == this) {
 				transient_parent->exclusive_child = nullptr;
@@ -590,6 +587,18 @@ bool Window::is_visible() const {
 }
 
 void Window::_update_window_size() {
+	// Force window to respect size limitations of rendering server
+	RenderingServer *rendering_server = RenderingServer::get_singleton();
+	if (rendering_server) {
+		Size2i max_window_size = rendering_server->get_maximum_viewport_size();
+
+		if (max_window_size != Size2i()) {
+			size = size.min(max_window_size);
+			min_size = min_size.min(max_window_size);
+			max_size = max_size.min(max_window_size);
+		}
+	}
+
 	Size2i size_limit;
 	if (wrap_controls) {
 		size_limit = get_contents_minimum_size();
@@ -635,9 +644,9 @@ void Window::_update_window_size() {
 			DisplayServer::get_singleton()->window_set_min_size(Size2i(), window_id);
 		}
 
-		DisplayServer::get_singleton()->window_set_size(size, window_id);
 		DisplayServer::get_singleton()->window_set_max_size(max_size_valid ? max_size : Size2i(), window_id);
 		DisplayServer::get_singleton()->window_set_min_size(size_limit, window_id);
+		DisplayServer::get_singleton()->window_set_size(size, window_id);
 	}
 
 	//update the viewport
@@ -650,7 +659,7 @@ void Window::_update_viewport_size() {
 	Size2i final_size;
 	Size2i final_size_override;
 	Rect2i attach_to_screen_rect(Point2i(), size);
-	Transform2D stretch_transform;
+	Transform2D stretch_transform_new;
 	float font_oversampling = 1.0;
 
 	if (content_scale_mode == CONTENT_SCALE_MODE_DISABLED || content_scale_size.x == 0 || content_scale_size.y == 0) {
@@ -658,8 +667,8 @@ void Window::_update_viewport_size() {
 		final_size = size;
 		final_size_override = Size2(size) / content_scale_factor;
 
-		stretch_transform = Transform2D();
-		stretch_transform.scale(Size2(content_scale_factor, content_scale_factor));
+		stretch_transform_new = Transform2D();
+		stretch_transform_new.scale(Size2(content_scale_factor, content_scale_factor));
 	} else {
 		//actual screen video mode
 		Size2 video_mode = size;
@@ -736,7 +745,7 @@ void Window::_update_viewport_size() {
 				font_oversampling = (screen_size.x / viewport_size.x) * content_scale_factor;
 
 				Size2 scale = Vector2(screen_size) / Vector2(final_size_override);
-				stretch_transform.scale(scale);
+				stretch_transform_new.scale(scale);
 
 			} break;
 			case CONTENT_SCALE_MODE_VIEWPORT: {
@@ -748,7 +757,7 @@ void Window::_update_viewport_size() {
 	}
 
 	bool allocate = is_inside_tree() && visible && (window_id != DisplayServer::INVALID_WINDOW_ID || embedder != nullptr);
-	_set_size(final_size, final_size_override, attach_to_screen_rect, stretch_transform, allocate);
+	_set_size(final_size, final_size_override, attach_to_screen_rect, stretch_transform_new, allocate);
 
 	if (window_id != DisplayServer::INVALID_WINDOW_ID) {
 		RenderingServer::get_singleton()->viewport_attach_to_screen(get_viewport_rid(), attach_to_screen_rect, window_id);
@@ -804,6 +813,14 @@ void Window::_notification(int p_what) {
 			_update_theme_item_cache();
 		} break;
 
+		case NOTIFICATION_PARENTED: {
+			theme_owner->assign_theme_on_parented(this);
+		} break;
+
+		case NOTIFICATION_UNPARENTED: {
+			theme_owner->clear_theme_on_unparented(this);
+		} break;
+
 		case NOTIFICATION_ENTER_TREE: {
 			bool embedded = false;
 			{
@@ -856,9 +873,7 @@ void Window::_notification(int p_what) {
 				RS::get_singleton()->viewport_set_active(get_viewport_rid(), true);
 			}
 
-			// Need to defer here, because theme owner information might be set in
-			// add_child_notify, which doesn't get called until right after this.
-			call_deferred(SNAME("notification"), NOTIFICATION_THEME_CHANGED);
+			notification(NOTIFICATION_THEME_CHANGED);
 		} break;
 
 		case NOTIFICATION_THEME_CHANGED: {
@@ -977,18 +992,6 @@ DisplayServer::WindowID Window::get_window_id() const {
 		return parent->get_window_id();
 	}
 	return window_id;
-}
-
-void Window::warp_mouse(const Vector2 &p_position) {
-	Transform2D xform = get_screen_transform();
-	Vector2 gpos = xform.xform(p_position);
-
-	if (transient_parent && !transient_parent->is_embedding_subwindows()) {
-		Transform2D window_trans = Transform2D().translated(get_position() + (transient_parent->get_visible_rect().size - transient_parent->get_real_size()));
-		gpos = window_trans.xform(gpos);
-	}
-
-	Input::get_singleton()->warp_mouse(gpos);
 }
 
 void Window::set_wrap_controls(bool p_enable) {
@@ -1146,7 +1149,7 @@ void Window::popup_centered_clamped(const Size2i &p_size, float p_fallback_ratio
 	Rect2 parent_rect;
 
 	if (is_embedded()) {
-		parent_rect = get_parent_viewport()->get_visible_rect();
+		parent_rect = _get_embedder()->get_visible_rect();
 	} else {
 		DisplayServer::WindowID parent_id = get_parent_visible_window()->get_window_id();
 		int parent_screen = DisplayServer::get_singleton()->window_get_current_screen(parent_id);
@@ -1172,7 +1175,7 @@ void Window::popup_centered(const Size2i &p_minsize) {
 	Rect2 parent_rect;
 
 	if (is_embedded()) {
-		parent_rect = get_parent_viewport()->get_visible_rect();
+		parent_rect = _get_embedder()->get_visible_rect();
 	} else {
 		DisplayServer::WindowID parent_id = get_parent_visible_window()->get_window_id();
 		int parent_screen = DisplayServer::get_singleton()->window_get_current_screen(parent_id);
@@ -1200,7 +1203,7 @@ void Window::popup_centered_ratio(float p_ratio) {
 	Rect2 parent_rect;
 
 	if (is_embedded()) {
-		parent_rect = get_parent_viewport()->get_visible_rect();
+		parent_rect = _get_embedder()->get_visible_rect();
 	} else {
 		DisplayServer::WindowID parent_id = get_parent_visible_window()->get_window_id();
 		int parent_screen = DisplayServer::get_singleton()->window_get_current_screen(parent_id);
@@ -1253,6 +1256,19 @@ void Window::popup(const Rect2i &p_screen_rect) {
 
 	set_transient(true);
 	set_visible(true);
+
+	Rect2i parent_rect;
+	if (is_embedded()) {
+		parent_rect = _get_embedder()->get_visible_rect();
+	} else {
+		int screen_id = DisplayServer::get_singleton()->window_get_current_screen(get_window_id());
+		parent_rect = DisplayServer::get_singleton()->screen_get_usable_rect(screen_id);
+	}
+	if (parent_rect != Rect2i() && !parent_rect.intersects(Rect2i(position, size))) {
+		ERR_PRINT(vformat("Window %d spawned at invalid position: %s.", get_window_id(), position));
+		set_position((parent_rect.size - size) / 2);
+	}
+
 	_post_popup();
 	notification(NOTIFICATION_POST_POPUP);
 }
@@ -1275,40 +1291,41 @@ bool Window::has_focus() const {
 
 Rect2i Window::get_usable_parent_rect() const {
 	ERR_FAIL_COND_V(!is_inside_tree(), Rect2());
-	Rect2i parent;
+	Rect2i parent_rect;
 	if (is_embedded()) {
-		parent = _get_embedder()->get_visible_rect();
+		parent_rect = _get_embedder()->get_visible_rect();
 	} else {
 		const Window *w = is_visible() ? this : get_parent_visible_window();
 		//find a parent that can contain us
 		ERR_FAIL_COND_V(!w, Rect2());
 
-		parent = DisplayServer::get_singleton()->screen_get_usable_rect(DisplayServer::get_singleton()->window_get_current_screen(w->get_window_id()));
+		parent_rect = DisplayServer::get_singleton()->screen_get_usable_rect(DisplayServer::get_singleton()->window_get_current_screen(w->get_window_id()));
 	}
-	return parent;
+	return parent_rect;
 }
 
 void Window::add_child_notify(Node *p_child) {
-	// We propagate when this node uses a custom theme, so it can pass it on to its children.
-	if (theme_owner || theme_owner_window) {
-		// `p_notify` is false here as `NOTIFICATION_THEME_CHANGED` will be handled by `NOTIFICATION_ENTER_TREE`.
-		Control::_propagate_theme_changed(this, theme_owner, theme_owner_window, false, true);
-	}
-
 	if (is_inside_tree() && wrap_controls) {
 		child_controls_changed();
 	}
 }
 
 void Window::remove_child_notify(Node *p_child) {
-	// If the removed child isn't inheriting any theme items through this node, then there's no need to propagate.
-	if (theme_owner || theme_owner_window) {
-		Control::_propagate_theme_changed(this, nullptr, nullptr, false, true);
-	}
-
 	if (is_inside_tree() && wrap_controls) {
 		child_controls_changed();
 	}
+}
+
+void Window::set_theme_owner_node(Node *p_node) {
+	theme_owner->set_owner_node(p_node);
+}
+
+Node *Window::get_theme_owner_node() const {
+	return theme_owner->get_owner_node();
+}
+
+bool Window::has_theme_owner_node() const {
+	return theme_owner->has_owner_node();
 }
 
 void Window::set_theme(const Ref<Theme> &p_theme) {
@@ -1322,24 +1339,24 @@ void Window::set_theme(const Ref<Theme> &p_theme) {
 
 	theme = p_theme;
 	if (theme.is_valid()) {
-		Control::_propagate_theme_changed(this, nullptr, this, is_inside_tree(), true);
+		theme_owner->propagate_theme_changed(this, this, is_inside_tree(), true);
 		theme->connect("changed", callable_mp(this, &Window::_theme_changed), CONNECT_DEFERRED);
 		return;
 	}
 
 	Control *parent_c = Object::cast_to<Control>(get_parent());
-	if (parent_c && (parent_c->data.theme_owner || parent_c->data.theme_owner_window)) {
-		Control::_propagate_theme_changed(this, parent_c->data.theme_owner, parent_c->data.theme_owner_window, is_inside_tree(), true);
+	if (parent_c && parent_c->has_theme_owner_node()) {
+		theme_owner->propagate_theme_changed(this, parent_c->get_theme_owner_node(), is_inside_tree(), true);
 		return;
 	}
 
 	Window *parent_w = cast_to<Window>(get_parent());
-	if (parent_w && (parent_w->theme_owner || parent_w->theme_owner_window)) {
-		Control::_propagate_theme_changed(this, parent_w->theme_owner, parent_w->theme_owner_window, is_inside_tree(), true);
+	if (parent_w && parent_w->has_theme_owner_node()) {
+		theme_owner->propagate_theme_changed(this, parent_w->get_theme_owner_node(), is_inside_tree(), true);
 		return;
 	}
 
-	Control::_propagate_theme_changed(this, nullptr, nullptr, is_inside_tree(), true);
+	theme_owner->propagate_theme_changed(this, nullptr, is_inside_tree(), true);
 }
 
 Ref<Theme> Window::get_theme() const {
@@ -1348,7 +1365,7 @@ Ref<Theme> Window::get_theme() const {
 
 void Window::_theme_changed() {
 	if (is_inside_tree()) {
-		Control::_propagate_theme_changed(this, nullptr, this, true, false);
+		theme_owner->propagate_theme_changed(this, this, true, false);
 	}
 }
 
@@ -1375,26 +1392,14 @@ StringName Window::get_theme_type_variation() const {
 	return theme_type_variation;
 }
 
-void Window::_get_theme_type_dependencies(const StringName &p_theme_type, List<StringName> *p_list) const {
-	if (p_theme_type == StringName() || p_theme_type == get_class_name() || p_theme_type == theme_type_variation) {
-		if (ThemeDB::get_singleton()->get_project_theme().is_valid() && ThemeDB::get_singleton()->get_project_theme()->get_type_variation_base(theme_type_variation) != StringName()) {
-			ThemeDB::get_singleton()->get_project_theme()->get_type_dependencies(get_class_name(), theme_type_variation, p_list);
-		} else {
-			ThemeDB::get_singleton()->get_default_theme()->get_type_dependencies(get_class_name(), theme_type_variation, p_list);
-		}
-	} else {
-		ThemeDB::get_singleton()->get_default_theme()->get_type_dependencies(p_theme_type, StringName(), p_list);
-	}
-}
-
 Ref<Texture2D> Window::get_theme_icon(const StringName &p_name, const StringName &p_theme_type) const {
 	if (theme_icon_cache.has(p_theme_type) && theme_icon_cache[p_theme_type].has(p_name)) {
 		return theme_icon_cache[p_theme_type][p_name];
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Ref<Texture2D> icon = Control::get_theme_item_in_types<Ref<Texture2D>>(theme_owner, theme_owner_window, Theme::DATA_TYPE_ICON, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Ref<Texture2D> icon = theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_ICON, p_name, theme_types);
 	theme_icon_cache[p_theme_type][p_name] = icon;
 	return icon;
 }
@@ -1405,8 +1410,8 @@ Ref<StyleBox> Window::get_theme_stylebox(const StringName &p_name, const StringN
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Ref<StyleBox> style = Control::get_theme_item_in_types<Ref<StyleBox>>(theme_owner, theme_owner_window, Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Ref<StyleBox> style = theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
 	theme_style_cache[p_theme_type][p_name] = style;
 	return style;
 }
@@ -1417,8 +1422,8 @@ Ref<Font> Window::get_theme_font(const StringName &p_name, const StringName &p_t
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Ref<Font> font = Control::get_theme_item_in_types<Ref<Font>>(theme_owner, theme_owner_window, Theme::DATA_TYPE_FONT, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Ref<Font> font = theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_FONT, p_name, theme_types);
 	theme_font_cache[p_theme_type][p_name] = font;
 	return font;
 }
@@ -1429,8 +1434,8 @@ int Window::get_theme_font_size(const StringName &p_name, const StringName &p_th
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	int font_size = Control::get_theme_item_in_types<int>(theme_owner, theme_owner_window, Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	int font_size = theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
 	theme_font_size_cache[p_theme_type][p_name] = font_size;
 	return font_size;
 }
@@ -1441,8 +1446,8 @@ Color Window::get_theme_color(const StringName &p_name, const StringName &p_them
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	Color color = Control::get_theme_item_in_types<Color>(theme_owner, theme_owner_window, Theme::DATA_TYPE_COLOR, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	Color color = theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_COLOR, p_name, theme_types);
 	theme_color_cache[p_theme_type][p_name] = color;
 	return color;
 }
@@ -1453,58 +1458,58 @@ int Window::get_theme_constant(const StringName &p_name, const StringName &p_the
 	}
 
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	int constant = Control::get_theme_item_in_types<int>(theme_owner, theme_owner_window, Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	int constant = theme_owner->get_theme_item_in_types(Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
 	theme_constant_cache[p_theme_type][p_name] = constant;
 	return constant;
 }
 
 bool Window::has_theme_icon(const StringName &p_name, const StringName &p_theme_type) const {
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return Control::has_theme_item_in_types(theme_owner, theme_owner_window, Theme::DATA_TYPE_ICON, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_ICON, p_name, theme_types);
 }
 
 bool Window::has_theme_stylebox(const StringName &p_name, const StringName &p_theme_type) const {
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return Control::has_theme_item_in_types(theme_owner, theme_owner_window, Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_STYLEBOX, p_name, theme_types);
 }
 
 bool Window::has_theme_font(const StringName &p_name, const StringName &p_theme_type) const {
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return Control::has_theme_item_in_types(theme_owner, theme_owner_window, Theme::DATA_TYPE_FONT, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_FONT, p_name, theme_types);
 }
 
 bool Window::has_theme_font_size(const StringName &p_name, const StringName &p_theme_type) const {
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return Control::has_theme_item_in_types(theme_owner, theme_owner_window, Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_FONT_SIZE, p_name, theme_types);
 }
 
 bool Window::has_theme_color(const StringName &p_name, const StringName &p_theme_type) const {
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return Control::has_theme_item_in_types(theme_owner, theme_owner_window, Theme::DATA_TYPE_COLOR, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_COLOR, p_name, theme_types);
 }
 
 bool Window::has_theme_constant(const StringName &p_name, const StringName &p_theme_type) const {
 	List<StringName> theme_types;
-	_get_theme_type_dependencies(p_theme_type, &theme_types);
-	return Control::has_theme_item_in_types(theme_owner, theme_owner_window, Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
+	theme_owner->get_theme_type_dependencies(this, p_theme_type, &theme_types);
+	return theme_owner->has_theme_item_in_types(Theme::DATA_TYPE_CONSTANT, p_name, theme_types);
 }
 
 float Window::get_theme_default_base_scale() const {
-	return Control::fetch_theme_default_base_scale(theme_owner, theme_owner_window);
+	return theme_owner->get_theme_default_base_scale();
 }
 
 Ref<Font> Window::get_theme_default_font() const {
-	return Control::fetch_theme_default_font(theme_owner, theme_owner_window);
+	return theme_owner->get_theme_default_font();
 }
 
 int Window::get_theme_default_font_size() const {
-	return Control::fetch_theme_default_font_size(theme_owner, theme_owner_window);
+	return theme_owner->get_theme_default_font_size();
 }
 
 Rect2i Window::get_parent_rect() const {
@@ -1564,9 +1569,9 @@ Window::LayoutDirection Window::get_layout_direction() const {
 
 bool Window::is_layout_rtl() const {
 	if (layout_dir == LAYOUT_DIRECTION_INHERITED) {
-		Window *parent = Object::cast_to<Window>(get_parent());
-		if (parent) {
-			return parent->is_layout_rtl();
+		Window *parent_w = Object::cast_to<Window>(get_parent());
+		if (parent_w) {
+			return parent_w->is_layout_rtl();
 		} else {
 			if (GLOBAL_GET(SNAME("internationalization/rendering/force_right_to_left_layout_direction"))) {
 				return true;
@@ -1628,7 +1633,7 @@ void Window::_validate_property(PropertyInfo &p_property) const {
 }
 
 Transform2D Window::get_screen_transform() const {
-	Transform2D embedder_transform = Transform2D();
+	Transform2D embedder_transform;
 	if (_get_embedder()) {
 		embedder_transform.translate_local(get_position());
 		embedder_transform = _get_embedder()->get_screen_transform() * embedder_transform;
@@ -1798,6 +1803,7 @@ void Window::_bind_methods() {
 	ADD_SIGNAL(MethodInfo("visibility_changed"));
 	ADD_SIGNAL(MethodInfo("about_to_popup"));
 	ADD_SIGNAL(MethodInfo("theme_changed"));
+	ADD_SIGNAL(MethodInfo("titlebar_changed"));
 
 	BIND_CONSTANT(NOTIFICATION_VISIBILITY_CHANGED);
 	BIND_CONSTANT(NOTIFICATION_THEME_CHANGED);
@@ -1834,8 +1840,15 @@ void Window::_bind_methods() {
 }
 
 Window::Window() {
+	RenderingServer *rendering_server = RenderingServer::get_singleton();
+	if (rendering_server) {
+		max_size = rendering_server->get_maximum_viewport_size();
+	}
+
+	theme_owner = memnew(ThemeOwner);
 	RS::get_singleton()->viewport_set_update_mode(get_viewport_rid(), RS::VIEWPORT_UPDATE_DISABLED);
 }
 
 Window::~Window() {
+	memdelete(theme_owner);
 }

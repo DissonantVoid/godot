@@ -157,6 +157,8 @@ public:
 
 	virtual void texture_set_force_redraw_if_visible(RID p_texture, bool p_enable) = 0;
 
+	virtual RID texture_get_rd_texture_rid(RID p_texture, bool p_srgb = false) const = 0;
+
 	/* SHADER API */
 
 	enum ShaderMode {
@@ -173,11 +175,11 @@ public:
 	virtual void shader_set_code(RID p_shader, const String &p_code) = 0;
 	virtual void shader_set_path_hint(RID p_shader, const String &p_path) = 0;
 	virtual String shader_get_code(RID p_shader) const = 0;
-	virtual void shader_get_shader_uniform_list(RID p_shader, List<PropertyInfo> *p_param_list) const = 0;
-	virtual Variant shader_get_param_default(RID p_shader, const StringName &p_param) const = 0;
+	virtual void get_shader_parameter_list(RID p_shader, List<PropertyInfo> *p_param_list) const = 0;
+	virtual Variant shader_get_parameter_default(RID p_shader, const StringName &p_param) const = 0;
 
-	virtual void shader_set_default_texture_param(RID p_shader, const StringName &p_name, RID p_texture, int p_index = 0) = 0;
-	virtual RID shader_get_default_texture_param(RID p_shader, const StringName &p_name, int p_index = 0) const = 0;
+	virtual void shader_set_default_texture_parameter(RID p_shader, const StringName &p_name, RID p_texture, int p_index = 0) = 0;
+	virtual RID shader_get_default_texture_parameter(RID p_shader, const StringName &p_name, int p_index = 0) const = 0;
 
 	struct ShaderNativeSourceCode {
 		struct Version {
@@ -484,6 +486,12 @@ public:
 	virtual void light_directional_set_shadow_mode(RID p_light, LightDirectionalShadowMode p_mode) = 0;
 	virtual void light_directional_set_blend_splits(RID p_light, bool p_enable) = 0;
 	virtual void light_directional_set_sky_mode(RID p_light, LightDirectionalSkyMode p_mode) = 0;
+
+	// Shadow atlas
+
+	virtual RID shadow_atlas_create() = 0;
+	virtual void shadow_atlas_set_size(RID p_atlas, int p_size, bool p_use_16_bits = true) = 0;
+	virtual void shadow_atlas_set_quadrant_subdivision(RID p_atlas, int p_quadrant, int p_subdivision) = 0;
 
 	virtual void directional_shadow_atlas_set_size(int p_size, bool p_16_bits = true) = 0;
 
@@ -801,6 +809,7 @@ public:
 	virtual void viewport_set_size(RID p_viewport, int p_width, int p_height) = 0;
 	virtual void viewport_set_active(RID p_viewport, bool p_active) = 0;
 	virtual void viewport_set_parent_viewport(RID p_viewport, RID p_parent_viewport) = 0;
+	virtual void viewport_set_canvas_cull_mask(RID p_viewport, uint32_t p_canvas_cull_mask) = 0;
 
 	virtual void viewport_attach_to_screen(RID p_viewport, const Rect2 &p_rect = Rect2(), DisplayServer::WindowID p_screen = DisplayServer::MAIN_WINDOW_ID) = 0;
 	virtual void viewport_set_render_direct_to_screen(RID p_viewport, bool p_enable) = 0;
@@ -1223,7 +1232,7 @@ public:
 
 	PackedInt64Array _instances_cull_aabb_bind(const AABB &p_aabb, RID p_scenario = RID()) const;
 	PackedInt64Array _instances_cull_ray_bind(const Vector3 &p_from, const Vector3 &p_to, RID p_scenario = RID()) const;
-	PackedInt64Array _instances_cull_convex_bind(const Array &p_convex, RID p_scenario = RID()) const;
+	PackedInt64Array _instances_cull_convex_bind(const TypedArray<Plane> &p_convex, RID p_scenario = RID()) const;
 
 	enum InstanceFlags {
 		INSTANCE_FLAG_USE_BAKED_LIGHT,
@@ -1255,10 +1264,10 @@ public:
 	virtual void instance_geometry_set_lod_bias(RID p_instance, float p_lod_bias) = 0;
 	virtual void instance_geometry_set_transparency(RID p_instance, float p_transparency) = 0;
 
-	virtual void instance_geometry_set_shader_uniform(RID p_instance, const StringName &, const Variant &p_value) = 0;
-	virtual Variant instance_geometry_get_shader_uniform(RID p_instance, const StringName &) const = 0;
-	virtual Variant instance_geometry_get_shader_uniform_default_value(RID p_instance, const StringName &) const = 0;
-	virtual void instance_geometry_get_shader_uniform_list(RID p_instance, List<PropertyInfo> *p_parameters) const = 0;
+	virtual void instance_geometry_set_shader_parameter(RID p_instance, const StringName &, const Variant &p_value) = 0;
+	virtual Variant instance_geometry_get_shader_parameter(RID p_instance, const StringName &) const = 0;
+	virtual Variant instance_geometry_get_shader_parameter_default_value(RID p_instance, const StringName &) const = 0;
+	virtual void instance_geometry_get_shader_parameter_list(RID p_instance, List<PropertyInfo> *p_parameters) const = 0;
 
 	/* Bake 3D objects */
 
@@ -1269,7 +1278,7 @@ public:
 		BAKE_CHANNEL_EMISSION
 	};
 
-	virtual TypedArray<Image> bake_render_uv2(RID p_base, const Vector<RID> &p_material_overrides, const Size2i &p_image_size) = 0;
+	virtual TypedArray<Image> bake_render_uv2(RID p_base, const TypedArray<RID> &p_material_overrides, const Size2i &p_image_size) = 0;
 
 	/* CANVAS (2D) */
 
@@ -1314,6 +1323,7 @@ public:
 	virtual void canvas_item_set_custom_rect(RID p_item, bool p_custom_rect, const Rect2 &p_rect = Rect2()) = 0;
 	virtual void canvas_item_set_modulate(RID p_item, const Color &p_color) = 0;
 	virtual void canvas_item_set_self_modulate(RID p_item, const Color &p_color) = 0;
+	virtual void canvas_item_set_visibility_layer(RID p_item, uint32_t p_visibility_layer) = 0;
 
 	virtual void canvas_item_set_draw_behind_parent(RID p_item, bool p_enable) = 0;
 
@@ -1361,7 +1371,8 @@ public:
 
 	enum CanvasGroupMode {
 		CANVAS_GROUP_MODE_DISABLED,
-		CANVAS_GROUP_MODE_OPAQUE,
+		CANVAS_GROUP_MODE_CLIP_ONLY,
+		CANVAS_GROUP_MODE_CLIP_AND_DRAW,
 		CANVAS_GROUP_MODE_TRANSPARENT,
 	};
 
@@ -1441,7 +1452,7 @@ public:
 
 	/* GLOBAL SHADER UNIFORMS */
 
-	enum GlobalShaderUniformType {
+	enum GlobalShaderParameterType {
 		GLOBAL_VAR_TYPE_BOOL,
 		GLOBAL_VAR_TYPE_BVEC2,
 		GLOBAL_VAR_TYPE_BVEC3,
@@ -1473,20 +1484,20 @@ public:
 		GLOBAL_VAR_TYPE_MAX
 	};
 
-	virtual void global_shader_uniform_add(const StringName &p_name, GlobalShaderUniformType p_type, const Variant &p_value) = 0;
-	virtual void global_shader_uniform_remove(const StringName &p_name) = 0;
-	virtual Vector<StringName> global_shader_uniform_get_list() const = 0;
+	virtual void global_shader_parameter_add(const StringName &p_name, GlobalShaderParameterType p_type, const Variant &p_value) = 0;
+	virtual void global_shader_parameter_remove(const StringName &p_name) = 0;
+	virtual Vector<StringName> global_shader_parameter_get_list() const = 0;
 
-	virtual void global_shader_uniform_set(const StringName &p_name, const Variant &p_value) = 0;
-	virtual void global_shader_uniform_set_override(const StringName &p_name, const Variant &p_value) = 0;
+	virtual void global_shader_parameter_set(const StringName &p_name, const Variant &p_value) = 0;
+	virtual void global_shader_parameter_set_override(const StringName &p_name, const Variant &p_value) = 0;
 
-	virtual Variant global_shader_uniform_get(const StringName &p_name) const = 0;
-	virtual GlobalShaderUniformType global_shader_uniform_get_type(const StringName &p_name) const = 0;
+	virtual Variant global_shader_parameter_get(const StringName &p_name) const = 0;
+	virtual GlobalShaderParameterType global_shader_parameter_get_type(const StringName &p_name) const = 0;
 
-	virtual void global_shader_uniforms_load_settings(bool p_load_textures) = 0;
-	virtual void global_shader_uniforms_clear() = 0;
+	virtual void global_shader_parameters_load_settings(bool p_load_textures) = 0;
+	virtual void global_shader_parameters_clear() = 0;
 
-	static int global_shader_uniform_type_get_shader_datatype(GlobalShaderUniformType p_type);
+	static int global_shader_uniform_type_get_shader_datatype(GlobalShaderParameterType p_type);
 
 	/* FREE */
 
@@ -1568,6 +1579,8 @@ public:
 
 	virtual void set_print_gpu_profile(bool p_enable) = 0;
 
+	virtual Size2i get_maximum_viewport_size() const = 0;
+
 	RenderingDevice *get_rendering_device() const;
 	RenderingDevice *create_local_rendering_device() const;
 
@@ -1583,11 +1596,11 @@ private:
 	RID _texture_3d_create(Image::Format p_format, int p_width, int p_height, int p_depth, bool p_mipmaps, const TypedArray<Image> &p_data);
 	void _texture_3d_update(RID p_texture, const TypedArray<Image> &p_data);
 	TypedArray<Image> _texture_3d_get(RID p_texture) const;
-	TypedArray<Dictionary> _shader_get_shader_uniform_list(RID p_shader) const;
+	TypedArray<Dictionary> _shader_get_shader_parameter_list(RID p_shader) const;
 	RID _mesh_create_from_surfaces(const TypedArray<Dictionary> &p_surfaces, int p_blend_shape_count);
 	void _mesh_add_surface(RID p_mesh, const Dictionary &p_surface);
 	Dictionary _mesh_get_surface(RID p_mesh, int p_idx);
-	TypedArray<Dictionary> _instance_geometry_get_shader_uniform_list(RID p_instance) const;
+	TypedArray<Dictionary> _instance_geometry_get_shader_parameter_list(RID p_instance) const;
 	TypedArray<Image> _bake_render_uv2(RID p_base, const TypedArray<RID> &p_material_overrides, const Size2i &p_image_size);
 	void _particles_set_trail_bind_poses(RID p_particles, const TypedArray<Transform3D> &p_bind_poses);
 };
@@ -1662,7 +1675,7 @@ VARIANT_ENUM_CAST(RenderingServer::CanvasLightMode);
 VARIANT_ENUM_CAST(RenderingServer::CanvasLightBlendMode);
 VARIANT_ENUM_CAST(RenderingServer::CanvasLightShadowFilter);
 VARIANT_ENUM_CAST(RenderingServer::CanvasOccluderPolygonCullMode);
-VARIANT_ENUM_CAST(RenderingServer::GlobalShaderUniformType);
+VARIANT_ENUM_CAST(RenderingServer::GlobalShaderParameterType);
 VARIANT_ENUM_CAST(RenderingServer::RenderingInfo);
 VARIANT_ENUM_CAST(RenderingServer::Features);
 VARIANT_ENUM_CAST(RenderingServer::CanvasTextureChannel);

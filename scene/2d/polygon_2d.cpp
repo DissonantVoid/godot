@@ -114,7 +114,7 @@ void Polygon2D::_notification(int p_what) {
 
 			ObjectID new_skeleton_id;
 
-			if (skeleton_node) {
+			if (skeleton_node && !invert && bone_weights.size()) {
 				RS::get_singleton()->canvas_item_attach_skeleton(get_canvas_item(), skeleton_node->get_skeleton());
 				new_skeleton_id = skeleton_node->get_instance_id();
 			} else {
@@ -640,7 +640,7 @@ void Polygon2D::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "texture", PROPERTY_HINT_RESOURCE_TYPE, "Texture2D"), "set_texture", "get_texture");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "texture_offset", PROPERTY_HINT_NONE, "suffix:px"), "set_texture_offset", "get_texture_offset");
 	ADD_PROPERTY(PropertyInfo(Variant::VECTOR2, "texture_scale", PROPERTY_HINT_LINK), "set_texture_scale", "get_texture_scale");
-	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "texture_rotation", PROPERTY_HINT_RANGE, "-360,360,0.1,or_lesser,or_greater,radians"), "set_texture_rotation", "get_texture_rotation");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "texture_rotation", PROPERTY_HINT_RANGE, "-360,360,0.1,or_less,or_greater,radians"), "set_texture_rotation", "get_texture_rotation");
 
 	ADD_GROUP("Skeleton", "");
 	ADD_PROPERTY(PropertyInfo(Variant::NODE_PATH, "skeleton", PROPERTY_HINT_NODE_PATH_VALID_TYPES, "Skeleton2D"), "set_skeleton", "get_skeleton");
@@ -663,5 +663,7 @@ Polygon2D::Polygon2D() {
 }
 
 Polygon2D::~Polygon2D() {
+	// This will free the internally-allocated mesh instance, if allocated.
+	RS::get_singleton()->canvas_item_attach_skeleton(get_canvas_item(), RID());
 	RS::get_singleton()->free(mesh);
 }
