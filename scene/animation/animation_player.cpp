@@ -956,8 +956,8 @@ void AnimationPlayer::_animation_process_animation(AnimationData *p_anim, double
 					}
 
 					if (player->is_playing()) {
-						player->play(anim_name);
 						player->seek(at_anim_pos);
+						player->play(anim_name);
 						nc->animation_playing = true;
 						playing_caches.insert(nc);
 					} else {
@@ -985,8 +985,8 @@ void AnimationPlayer::_animation_process_animation(AnimationData *p_anim, double
 								nc->animation_playing = false;
 							}
 						} else {
+							player->seek(0.0);
 							player->play(anim_name);
-							player->seek(0.0, true);
 							nc->animation_playing = true;
 							playing_caches.insert(nc);
 						}
@@ -2071,7 +2071,7 @@ Ref<AnimatedValuesBackup> AnimationPlayer::apply_reset(bool p_user_initiated) {
 		old_values->restore();
 
 		Ref<EditorUndoRedoManager> &ur = EditorNode::get_undo_redo();
-		ur->create_action(TTR("Anim Apply Reset"));
+		ur->create_action(TTR("Animation Apply Reset"));
 		ur->add_do_method(new_values.ptr(), "restore");
 		ur->add_undo_method(old_values.ptr(), "restore");
 		ur->commit_action();

@@ -117,8 +117,7 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 			result.builtin_type = p_datatype.builtin_type;
 			result.native_type = p_datatype.native_type;
 
-			String root_name = p_datatype.class_type->fqcn.get_slice("::", 0);
-			bool is_local_class = !root_name.is_empty() && root_name == main_script->fully_qualified_name;
+			bool is_local_class = parser->has_class(p_datatype.class_type);
 
 			Ref<GDScript> script;
 			if (is_local_class) {
@@ -157,6 +156,7 @@ GDScriptDataType GDScriptCompiler::_gdtype_from_datatype(const GDScriptParser::D
 				result.builtin_type = Variant::INT;
 			}
 			break;
+		case GDScriptParser::DataType::RESOLVING:
 		case GDScriptParser::DataType::UNRESOLVED: {
 			ERR_PRINT("Parser bug: converting unresolved type.");
 			return GDScriptDataType();
@@ -1256,9 +1256,30 @@ GDScriptCodeGenerator::Address GDScriptCompiler::_parse_match_pattern(CodeGen &c
 			equality_type.kind = GDScriptDataType::BUILTIN;
 			equality_type.builtin_type = Variant::BOOL;
 
+			GDScriptCodeGenerator::Address type_string_addr = codegen.add_constant(Variant::STRING);
+			GDScriptCodeGenerator::Address type_string_name_addr = codegen.add_constant(Variant::STRING_NAME);
+
 			// Check type equality.
 			GDScriptCodeGenerator::Address type_equality_addr = codegen.add_temporary(equality_type);
 			codegen.generator->write_binary_operator(type_equality_addr, Variant::OP_EQUAL, p_type_addr, literal_type_addr);
+
+			// Check if StringName <-> String comparison is possible.
+			GDScriptCodeGenerator::Address type_comp_addr_1 = codegen.add_temporary(equality_type);
+			GDScriptCodeGenerator::Address type_comp_addr_2 = codegen.add_temporary(equality_type);
+
+			codegen.generator->write_binary_operator(type_comp_addr_1, Variant::OP_EQUAL, p_type_addr, type_string_addr);
+			codegen.generator->write_binary_operator(type_comp_addr_2, Variant::OP_EQUAL, literal_type_addr, type_string_name_addr);
+			codegen.generator->write_binary_operator(type_comp_addr_1, Variant::OP_AND, type_comp_addr_1, type_comp_addr_2);
+			codegen.generator->write_binary_operator(type_equality_addr, Variant::OP_OR, type_equality_addr, type_comp_addr_1);
+
+			codegen.generator->write_binary_operator(type_comp_addr_1, Variant::OP_EQUAL, p_type_addr, type_string_name_addr);
+			codegen.generator->write_binary_operator(type_comp_addr_2, Variant::OP_EQUAL, literal_type_addr, type_string_addr);
+			codegen.generator->write_binary_operator(type_comp_addr_1, Variant::OP_AND, type_comp_addr_1, type_comp_addr_2);
+			codegen.generator->write_binary_operator(type_equality_addr, Variant::OP_OR, type_equality_addr, type_comp_addr_1);
+
+			codegen.generator->pop_temporary(); // Remove type_comp_addr_2 from stack.
+			codegen.generator->pop_temporary(); // Remove type_comp_addr_1 from stack.
+
 			codegen.generator->write_and_left_operand(type_equality_addr);
 
 			// Get literal.
@@ -2096,8 +2117,8 @@ GDScriptFunction *GDScriptCompiler::_parse_function(Error &r_error, GDScript *p_
 	if (EngineDebugger::is_active()) {
 		String signature;
 		// Path.
-		if (!p_script->get_path().is_empty()) {
-			signature += p_script->get_path();
+		if (!p_script->get_script_path().is_empty()) {
+			signature += p_script->get_script_path();
 		}
 		// Location.
 		if (p_func) {
@@ -2278,7 +2299,7 @@ Error GDScriptCompiler::_populate_class_members(GDScript *p_script, const GDScri
 				return ERR_COMPILATION_FAILED;
 			}
 
-			if (base.ptr() == main_script || main_script->is_subclass(base.ptr())) {
+			if (main_script->has_class(base.ptr())) {
 				Error err = _populate_class_members(base.ptr(), p_class->base_type.class_type, p_keep_state);
 				if (err) {
 					return err;
@@ -2368,6 +2389,7 @@ Error GDScriptCompiler::_populate_class_members(GDScript *p_script, const GDScri
 #ifdef TOOLS_ENABLED
 				if (variable->initializer != nullptr && variable->initializer->is_constant) {
 					p_script->member_default_values[name] = variable->initializer->reduced_value;
+					GDScriptCompiler::convert_to_initializer_type(p_script->member_default_values[name], variable);
 				} else {
 					p_script->member_default_values.erase(name);
 				}
@@ -2623,6 +2645,20 @@ Error GDScriptCompiler::_compile_class(GDScript *p_script, const GDScriptParser:
 
 	p_script->valid = true;
 	return OK;
+}
+
+void GDScriptCompiler::convert_to_initializer_type(Variant &p_variant, const GDScriptParser::VariableNode *p_node) {
+	// Set p_variant to the value of p_node's initializer, with the type of p_node's variable.
+	GDScriptParser::DataType member_t = p_node->datatype;
+	GDScriptParser::DataType init_t = p_node->initializer->datatype;
+	if (member_t.is_hard_type() && init_t.is_hard_type() &&
+			member_t.kind == GDScriptParser::DataType::BUILTIN && init_t.kind == GDScriptParser::DataType::BUILTIN) {
+		if (Variant::can_convert_strict(init_t.builtin_type, member_t.builtin_type)) {
+			Variant *v = &p_node->initializer->reduced_value;
+			Callable::CallError ce;
+			Variant::construct(member_t.builtin_type, p_variant, const_cast<const Variant **>(&v), 1, ce);
+		}
+	}
 }
 
 void GDScriptCompiler::make_scripts(GDScript *p_script, const GDScriptParser::ClassNode *p_class, bool p_keep_state) {
