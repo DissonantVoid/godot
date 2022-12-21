@@ -74,7 +74,7 @@ bool GridMap::_set(const StringName &p_name, const Variant &p_value) {
 			bm.mesh = meshes[i];
 			ERR_CONTINUE(!bm.mesh.is_valid());
 			bm.instance = RS::get_singleton()->instance_create();
-			RS::get_singleton()->get_singleton()->instance_set_base(bm.instance, bm.mesh->get_rid());
+			RS::get_singleton()->instance_set_base(bm.instance, bm.mesh->get_rid());
 			RS::get_singleton()->instance_attach_object_instance_id(bm.instance, get_instance_id());
 			if (is_inside_tree()) {
 				RS::get_singleton()->instance_set_scenario(bm.instance, get_world_3d()->get_scenario());
@@ -138,7 +138,7 @@ void GridMap::_get_property_list(List<PropertyInfo> *p_list) const {
 
 void GridMap::set_collision_layer(uint32_t p_layer) {
 	collision_layer = p_layer;
-	_reset_physic_bodies_collision_filters();
+	_update_physics_bodies_collision_properties();
 }
 
 uint32_t GridMap::get_collision_layer() const {
@@ -147,7 +147,7 @@ uint32_t GridMap::get_collision_layer() const {
 
 void GridMap::set_collision_mask(uint32_t p_mask) {
 	collision_mask = p_mask;
-	_reset_physic_bodies_collision_filters();
+	_update_physics_bodies_collision_properties();
 }
 
 uint32_t GridMap::get_collision_mask() const {
@@ -182,6 +182,15 @@ void GridMap::set_collision_mask_value(int p_layer_number, bool p_value) {
 		mask &= ~(1 << (p_layer_number - 1));
 	}
 	set_collision_mask(mask);
+}
+
+void GridMap::set_collision_priority(real_t p_priority) {
+	collision_priority = p_priority;
+	_update_physics_bodies_collision_properties();
+}
+
+real_t GridMap::get_collision_priority() const {
+	return collision_priority;
 }
 
 void GridMap::set_physics_material(Ref<PhysicsMaterial> p_material) {
@@ -245,33 +254,6 @@ RID GridMap::get_navigation_map() const {
 		return get_world_3d()->get_navigation_map();
 	}
 	return RID();
-}
-
-void GridMap::set_navigation_layers(uint32_t p_navigation_layers) {
-	navigation_layers = p_navigation_layers;
-	_recreate_octant_data();
-}
-
-uint32_t GridMap::get_navigation_layers() const {
-	return navigation_layers;
-}
-
-void GridMap::set_navigation_layer_value(int p_layer_number, bool p_value) {
-	ERR_FAIL_COND_MSG(p_layer_number < 1, "Navigation layer number must be between 1 and 32 inclusive.");
-	ERR_FAIL_COND_MSG(p_layer_number > 32, "Navigation layer number must be between 1 and 32 inclusive.");
-	uint32_t _navigation_layers = get_navigation_layers();
-	if (p_value) {
-		_navigation_layers |= 1 << (p_layer_number - 1);
-	} else {
-		_navigation_layers &= ~(1 << (p_layer_number - 1));
-	}
-	set_navigation_layers(_navigation_layers);
-}
-
-bool GridMap::get_navigation_layer_value(int p_layer_number) const {
-	ERR_FAIL_COND_V_MSG(p_layer_number < 1, false, "Navigation layer number must be between 1 and 32 inclusive.");
-	ERR_FAIL_COND_V_MSG(p_layer_number > 32, false, "Navigation layer number must be between 1 and 32 inclusive.");
-	return get_navigation_layers() & (1 << (p_layer_number - 1));
 }
 
 void GridMap::set_mesh_library(const Ref<MeshLibrary> &p_mesh_library) {
@@ -385,6 +367,7 @@ void GridMap::set_cell_item(const Vector3i &p_position, int p_item, int p_rot) {
 		PhysicsServer3D::get_singleton()->body_attach_object_instance_id(g->static_body, get_instance_id());
 		PhysicsServer3D::get_singleton()->body_set_collision_layer(g->static_body, collision_layer);
 		PhysicsServer3D::get_singleton()->body_set_collision_mask(g->static_body, collision_mask);
+		PhysicsServer3D::get_singleton()->body_set_collision_priority(g->static_body, collision_priority);
 		if (physics_material.is_valid()) {
 			PhysicsServer3D::get_singleton()->body_set_param(g->static_body, PhysicsServer3D::BODY_PARAM_FRICTION, physics_material->get_friction());
 			PhysicsServer3D::get_singleton()->body_set_param(g->static_body, PhysicsServer3D::BODY_PARAM_BOUNCE, physics_material->get_bounce());
@@ -653,11 +636,12 @@ bool GridMap::_octant_update(const OctantKey &p_key) {
 		if (navigation_mesh.is_valid()) {
 			Octant::NavigationCell nm;
 			nm.xform = xform * mesh_library->get_item_navigation_mesh_transform(c.item);
+			nm.navigation_layers = mesh_library->get_item_navigation_layers(c.item);
 
 			if (bake_navigation) {
 				RID region = NavigationServer3D::get_singleton()->region_create();
 				NavigationServer3D::get_singleton()->region_set_owner_id(region, get_instance_id());
-				NavigationServer3D::get_singleton()->region_set_navigation_layers(region, navigation_layers);
+				NavigationServer3D::get_singleton()->region_set_navigation_layers(region, nm.navigation_layers);
 				NavigationServer3D::get_singleton()->region_set_navigation_mesh(region, navigation_mesh);
 				NavigationServer3D::get_singleton()->region_set_transform(region, get_global_transform() * nm.xform);
 				if (is_inside_tree()) {
@@ -751,10 +735,11 @@ bool GridMap::_octant_update(const OctantKey &p_key) {
 	return false;
 }
 
-void GridMap::_reset_physic_bodies_collision_filters() {
+void GridMap::_update_physics_bodies_collision_properties() {
 	for (const KeyValue<OctantKey, Octant *> &E : octant_map) {
 		PhysicsServer3D::get_singleton()->body_set_collision_layer(E.value->static_body, collision_layer);
 		PhysicsServer3D::get_singleton()->body_set_collision_mask(E.value->static_body, collision_mask);
+		PhysicsServer3D::get_singleton()->body_set_collision_priority(E.value->static_body, collision_priority);
 	}
 }
 
@@ -781,7 +766,7 @@ void GridMap::_octant_enter_world(const OctantKey &p_key) {
 				if (navigation_mesh.is_valid()) {
 					RID region = NavigationServer3D::get_singleton()->region_create();
 					NavigationServer3D::get_singleton()->region_set_owner_id(region, get_instance_id());
-					NavigationServer3D::get_singleton()->region_set_navigation_layers(region, navigation_layers);
+					NavigationServer3D::get_singleton()->region_set_navigation_layers(region, F.value.navigation_layers);
 					NavigationServer3D::get_singleton()->region_set_navigation_mesh(region, navigation_mesh);
 					NavigationServer3D::get_singleton()->region_set_transform(region, get_global_transform() * F.value.xform);
 					if (map_override.is_valid()) {
@@ -1047,6 +1032,9 @@ void GridMap::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_collision_layer_value", "layer_number", "value"), &GridMap::set_collision_layer_value);
 	ClassDB::bind_method(D_METHOD("get_collision_layer_value", "layer_number"), &GridMap::get_collision_layer_value);
 
+	ClassDB::bind_method(D_METHOD("set_collision_priority", "priority"), &GridMap::set_collision_priority);
+	ClassDB::bind_method(D_METHOD("get_collision_priority"), &GridMap::get_collision_priority);
+
 	ClassDB::bind_method(D_METHOD("set_physics_material", "material"), &GridMap::set_physics_material);
 	ClassDB::bind_method(D_METHOD("get_physics_material"), &GridMap::get_physics_material);
 
@@ -1055,12 +1043,6 @@ void GridMap::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("set_navigation_map", "navigation_map"), &GridMap::set_navigation_map);
 	ClassDB::bind_method(D_METHOD("get_navigation_map"), &GridMap::get_navigation_map);
-
-	ClassDB::bind_method(D_METHOD("set_navigation_layers", "layers"), &GridMap::set_navigation_layers);
-	ClassDB::bind_method(D_METHOD("get_navigation_layers"), &GridMap::get_navigation_layers);
-
-	ClassDB::bind_method(D_METHOD("set_navigation_layer_value", "layer_number", "value"), &GridMap::set_navigation_layer_value);
-	ClassDB::bind_method(D_METHOD("get_navigation_layer_value", "layer_number"), &GridMap::get_navigation_layer_value);
 
 	ClassDB::bind_method(D_METHOD("set_mesh_library", "mesh_library"), &GridMap::set_mesh_library);
 	ClassDB::bind_method(D_METHOD("get_mesh_library"), &GridMap::get_mesh_library);
@@ -1118,9 +1100,9 @@ void GridMap::_bind_methods() {
 	ADD_GROUP("Collision", "collision_");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_layer", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_layer", "get_collision_layer");
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "collision_mask", PROPERTY_HINT_LAYERS_3D_PHYSICS), "set_collision_mask", "get_collision_mask");
+	ADD_PROPERTY(PropertyInfo(Variant::FLOAT, "collision_priority"), "set_collision_priority", "get_collision_priority");
 	ADD_GROUP("Navigation", "");
 	ADD_PROPERTY(PropertyInfo(Variant::BOOL, "bake_navigation"), "set_bake_navigation", "is_baking_navigation");
-	ADD_PROPERTY(PropertyInfo(Variant::INT, "navigation_layers", PROPERTY_HINT_LAYERS_3D_NAVIGATION), "set_navigation_layers", "get_navigation_layers");
 
 	BIND_CONSTANT(INVALID_CELL_ITEM);
 
@@ -1281,7 +1263,7 @@ void GridMap::make_baked_meshes(bool p_gen_lightmap_uv, float p_lightmap_uv_texe
 		BakedMesh bm;
 		bm.mesh = mesh;
 		bm.instance = RS::get_singleton()->instance_create();
-		RS::get_singleton()->get_singleton()->instance_set_base(bm.instance, bm.mesh->get_rid());
+		RS::get_singleton()->instance_set_base(bm.instance, bm.mesh->get_rid());
 		RS::get_singleton()->instance_attach_object_instance_id(bm.instance, get_instance_id());
 		if (is_inside_tree()) {
 			RS::get_singleton()->instance_set_scenario(bm.instance, get_world_3d()->get_scenario());
